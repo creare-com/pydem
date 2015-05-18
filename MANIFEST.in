@@ -1,0 +1,6 @@
+include *.txt 
+global-include *.md
+global-include *.pyx
+global-include *.cpp
+global-include *.py
+recursive-include pydem/taudem *
