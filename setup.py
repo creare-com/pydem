@@ -26,7 +26,7 @@ import numpy as np
 
 from Cython.Build import cythonize
 
-here = os.path.join(path.abspath(path.dirname(__file__)), 'pydem')
+here = os.path.join(path.dirname(__file__), 'pydem')
 
 compile_args = []
 compile_args.append("-O3")
