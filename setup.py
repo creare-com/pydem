@@ -76,9 +76,9 @@ setup(
         'Development Status :: 3 - Alpha',
         # Indicate who your project is intended for
         'Intended Audience :: Developers',
-        'Topic :: Geospatial :: Elevation :: Analysis',
+        'Topic :: Scientific/Engineering :: GIS',
         # Pick your license as you wish (should match "license" above)
-         'License :: OSI Approved :: APACHE 2.0 License',
+         'License :: OSI Approved :: Apache Software License',
         # Specify the Python versions you support here. In particular, ensure
         # that you indicate whether you support Python 2, Python 3 or both.
         'Programming Language :: Python :: 2.7',
