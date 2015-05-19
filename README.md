@@ -17,7 +17,7 @@ certain steps (e.g., pitfilling) and it also makes extensive use of the GDAL
 library for working with geospatial rasters.
 
 ## 1. Installation
-For installation notes, see [install.md](install.md)
+For installation notes, see [install.md](INSTALL.md)
 
 ## 2. Basic Usage
 Examples and tests can be found in the `pydem\examples` directory.
