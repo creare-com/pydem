@@ -30,7 +30,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description='Compare pydem output to taudem output')
     parser.add_argument('testnum', help='the number of the test elevation to '
-                        'process', type=int, default=31, nargs='?')
+                        'process', type=int, default=30, nargs='?')
     parser.add_argument('--variable-coords', '--vc',
                         help='if set, will create a non-'
                         'uniform grid on the elevation', action="store_true")
@@ -40,7 +40,7 @@ if __name__ == "__main__":
     testnum += dx_dy_from_file
 
 
-    NN = 511  # The resolution of the grid (N x N)
+    NN = 64  # The resolution of the grid (N x N)
 
     if testnum >= 28:
         filename = make_file_names(testnum, NN)['elev']
