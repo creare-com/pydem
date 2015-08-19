@@ -1,4 +1,4 @@
-# pydem: A python digital elevation model analysis package
+# pyDEM: A python digital elevation model analysis package
 -----------------------------------------------------------
 
 PyDEM is a package for topographic (terrain) analysis written in Python (with a
@@ -12,7 +12,7 @@ PyDEM can be used both from the command-line, or programmatically via its Python
 API. Examples of both usages are given below and in the examples directory. It
 can operate on individual elevation rasters, or on entire directories
 simultaneously. Most processing steps can be performed in parallel with any
-number of independent PyDEM processes. Note that PyDEM depends on TauDEM for
+number of independent pyDEM processes. Note that pyDEM depends on TauDEM for
 certain steps (e.g., pitfilling) and it also makes extensive use of the GDAL
 library for working with geospatial rasters.
 
@@ -193,7 +193,7 @@ When installing pydem using the provided setup.py file, the commandline utilitie
   * Manages the calculation of the upstream contributing area that drains across tile edges.
   * Stores errors in the processing.
   * Allows multiple processes to work on the same directory without causing conflicts.
-* `test_pydem.py`: A few helper utilities that create analytic test-cases used to develop/test pydem.
+* `test_pydem.py`: A few helper utilities that create analytic test-cases used to develop/test pyDEM.
 * `utils.py`: A few helper utility functions.
   * Renames files in a directory.
   * Parses file names.
