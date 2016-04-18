@@ -103,11 +103,11 @@ FLAT_ID = np.nan  # This is the fill value for flats in float arrays
 FLAT_ID_INT = -1  # This is the fill value for flats in int arrays
 
 # Used to extend flat region downstream when calculating angle
-FLATS_KERNEL1 = np.ones((3, 3))
-FLATS_KERNEL2 = np.ones((3, 3))  # Convolution used to find edges to the flats
+FLATS_KERNEL1 = np.ones((3, 3), bool)
+FLATS_KERNEL2 = np.ones((3, 3), bool)  # Convolution used to find edges to the flats
 # This is the only choice for FLATS_KERNEL3 because otherwise it won't play
 # nicely with the pit-filling algorithm
-FLATS_KERNEL3 = np.ones((3, 3))  # Kernel used to connect flats and edges
+FLATS_KERNEL3 = np.ones((3, 3), bool)  # Kernel used to connect flats and edges
 FILL_VALUE = -9999  # This is the integer fill value for no-data values
 
 
