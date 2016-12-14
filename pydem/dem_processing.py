@@ -937,9 +937,10 @@ class DEMProcessor(object):
 
                     ids_tmp = (i_2 >= 0) & (j_2 >= 0) & (i_2 < nn) & (j_2 < mm)
                     ids_tmp2 = data[i_2[ids_tmp], j_2[ids_tmp]] == elev_flat
-                    flats[i_2[ids_tmp][ids_tmp2], j_2[ids_tmp][ids_tmp2]]\
-                        += FLATS_KERNEL3[iii+1, jjj+1]
-
+                    np.add(flats[i_2[ids_tmp][ids_tmp2], j_2[ids_tmp][ids_tmp2]], 
+				    FLATS_KERNEL3[iii+1, jjj+1], 
+				    out = flats[i_2[ids_tmp][ids_tmp2], j_2[ids_tmp][ids_tmp2]], 
+				    casting = "unsafe")
         return flats
 
     def calc_uca(self, plotflag=False, edge_init_data=None, uca_init=None):
