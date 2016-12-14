@@ -48,12 +48,6 @@ The Edge and TileEdge classes keep track of the edge information for tiles
 
 Development Notes
 ------------------
-TODO: Implement this for the elevation data http://pastebin.com/umNmSrE2 .
-    Generally the DEM data is stored as integers. So in areas with flat terrain
-    due to rounding there may be large flats. We can create interpolated
-    floating point values in those regions so that we can still get good
-    answers
-
 TODO: Replace complete file loading with partial loading from disk to RAM.
     Presently, an entire geotiff is loaded into memory, which makes the
     chunk calculation less useful because the memory restriction is still
