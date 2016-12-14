@@ -40,7 +40,8 @@ import re
 from reader.gdal_reader import GdalReader
 
 import numpy as np
-
+from scipy.ndimage.filters import minimum_filter
+from scipy.ndimage.measurements import center_of_mass
 
 def rename_files(files, name=None):
     """
@@ -255,3 +256,218 @@ def sortrows(a, i=0, index_out=False, recurse=True):
         return a, I
     else:
         return a
+
+def _adj(I, shape, size):
+    """
+    Find indices 2d-adjacent to those in I. Helper function for get_border*.
+
+    Parameters
+    ----------
+    I : np.ndarray(dtype=int)
+        indices in the flattened region
+    shape : tuple(int, int)
+        region shape
+    size : int
+        region size (technically computable from shape)
+
+    Returns
+    -------
+    J : np.ndarray(dtype=int)
+        indices orthogonally and diagonally adjacent to I
+
+    """
+
+    m, n = shape
+    In = I % n
+    bL = In != 0
+    bR = In != n-1
+    
+    J = np.concatenate([
+        # orthonally adjacent
+        I - n,
+        I[bL] - 1,
+        I[bR] + 1,
+        I + n,
+
+        # diagonally adjacent
+        I[bL] - n-1,
+        I[bR] - n+1,
+        I[bL] + n-1,
+        I[bR] + n+1])
+
+    # remove indices outside the array
+    J = J[(J>=0) & (J<size)]
+
+    return J
+
+def get_border_index(I, shape, size):
+    """
+    Get flattened indices for the border of the region I.
+
+    Parameters
+    ----------
+    I : np.ndarray(dtype=int)
+        indices in the flattened region.
+    size : int
+        region size (technically computable from shape argument)
+    shape : tuple(int, int)
+        region shape
+
+    Returns
+    -------
+    J : np.ndarray(dtype=int)
+        indices orthogonally and diagonally bordering I
+    """
+
+    J = _adj(I, shape, size)
+
+    # instead of setdiff?
+    # border = np.zeros(size)
+    # border[J] = 1
+    # border[I] = 0
+    # J, = np.where(border)
+
+    return np.setdiff1d(J, I)
+
+def get_border_mask(region):
+    """
+    Get border of the region as a boolean array mask.
+
+    Parameters
+    ----------
+    region : np.ndarray(shape=(m, n), dtype=bool)
+        mask of the region
+
+    Returns
+    -------
+    border : np.ndarray(shape=(m, n), dtype=bool)
+        mask of the region border (not including region)
+    """
+
+    # common special case (for efficiency)
+    if region[1:-1, 1:-1].all():
+        return ~region
+    
+    I, = np.where(region.ravel())
+    J = _adj(I, region.shape, region.size)
+
+    border = np.zeros(region.size, dtype='bool')
+    border[J] = 1
+    border[I] = 0
+    border = border.reshape(region.shape)
+
+    return border
+
+_ORTH2 = np.array([[0, 1, 0], [1, 1, 1], [0, 1, 0]])
+_SQRT2 = np.sqrt(2.0)
+def get_distance(region, src):
+    """
+    Compute within-region distances from the src pixels.
+
+    Parameters
+    ----------
+    region : np.ndarray(shape=(m, n), dtype=bool)
+        mask of the region
+    src : np.ndarray(shape=(m, n), dtype=bool)
+        mask of the source pixels to compute distances from.
+
+    Returns
+    -------
+    d : np.ndarray(shape=(m, n), dtype=float)
+        approximate within-region distance from the nearest src pixel;
+        (distances outside of the region are arbitrary).
+    """
+
+    dmax = float(region.size)
+    d = np.full(region.shape, dmax)
+    d[src] = 0
+    for n in range(region.size):
+        d_orth = minimum_filter(d, footprint=_ORTH2) + 1
+        d_diag = minimum_filter(d, (3, 3)) + _SQRT2
+        d_adj = np.minimum(d_orth[region], d_diag[region])
+        d[region] = np.minimum(d_adj, d[region])
+        if (d[region] < dmax).all():
+            break
+    return d
+
+def grow_slice(slc, size):
+    """
+    Grow a slice object by 1 in each direction without overreaching the list.
+
+    Parameters
+    ----------
+    slc: slice
+        slice object to grow
+    size: int
+        list length
+
+    Returns
+    -------
+    slc: slice
+       extended slice 
+
+    """
+
+    return slice(max(0, slc.start-1), min(size, slc.stop+1))
+
+def grow_obj(obj, shape):
+    """
+    Grow a 2d object by 1 in all directions without overreaching the array.
+
+    Parameters
+    ----------
+    obj: tuple(slice, slice)
+        Pair of slices (e.g. from scipy.ndimage.measurements.find_objects)
+    shape: tuple(int, int)
+        2d array shape
+
+    Returns
+    -------
+    obj: tuple(slice, slice)
+        extended slice objects
+    """
+
+    return grow_slice(obj[0], shape[0]), grow_slice(obj[1], shape[1])
+
+def is_edge(obj, shape):
+    """
+    Check if a 2d object is on the edge of the array.
+
+    Parameters
+    ----------
+    obj : tuple(slice, slice)
+        Pair of slices (e.g. from scipy.ndimage.measurements.find_objects)
+    shape : tuple(int, int)
+        Array shape.
+
+    Returns
+    -------
+    b : boolean
+        True if the object touches any edge of the array, else False.
+    """
+
+    if obj[0].start == 0: return True
+    if obj[1].start == 0: return True
+    if obj[0].stop == shape[0]: return True
+    if obj[1].stop == shape[1]: return True
+    return False
+
+def find_centroid(region):
+    """
+    Finds an approximate centroid for a region that is within the region.
+    
+    Parameters
+    ----------
+    region : np.ndarray(shape=(m, n), dtype='bool')
+        mask of the region.
+
+    Returns
+    -------
+    i, j : tuple(int, int)
+        2d index within the region nearest the center of mass.
+    """
+
+    x, y = center_of_mass(region)
+    w = np.argwhere(region)
+    i, j = w[np.argmin(np.linalg.norm(w - (x, y), axis=1))]
+    return i, j

@@ -80,12 +80,13 @@ import os
 import subprocess
 import scipy.sparse as sps
 import scipy.ndimage as spndi
-import numba
 
 from reader.gdal_reader import GdalReader
 from taudem import taudem
 from test_pydem import get_test_data, make_file_names
-from utils import mk_dx_dy_from_geotif_layer, get_fn
+from utils import (mk_dx_dy_from_geotif_layer, get_fn,
+                   is_edge, grow_obj, find_centroid,
+                   get_border_index, get_border_mask, get_distance)
 
 try:
     from cyfuncs import cyutils
@@ -464,6 +465,12 @@ class DEMProcessor(object):
 #    apply_twi_limits = True
 #    apply_twi_limits_on_uca = True
 
+    fill_flats = True
+    fill_flats_below_sea = False
+    flat_source_tol = 0
+    fill_peaks = True
+    fill_pits = True
+
     # When resolving drainage across edges, if maximum UCA is reached, should
     # edge be marked as completed?
     apply_uca_limit_edges = False
@@ -555,6 +562,7 @@ class DEMProcessor(object):
             elev_file = GdalReader(file_name=file_name)
             elev, = elev_file.raster_layers
             data = elev.raster_data
+
             self.elev = elev
             self.data = data
             try:  # if masked array
@@ -810,11 +818,108 @@ class DEMProcessor(object):
         self.mag[flats] = FLAT_ID
         self.flats = flats
 
+    def _fill_flat(self, roi, out, region, bEdge, it=0):
+        # TODO rivers crossing an edge or multiple edges is not well covered
+
+        e = roi[region][0]
+
+        # 1-pixel special cases
+        # shapes: 3x3, 3x2 (left/right), 2x3 (top/bottom), and 2x2 (corner)
+        size = roi.size
+        if size <= 9:
+            source = roi > e
+            n = source.sum()
+            if n == size-1: pass # pit
+            elif n > 0: out[region] += min(0.5, (roi[source].min() - e) / 2) # special fill case
+            elif self.fill_peaks: out[region] += 0.5 # small peak
+            return
+
+        # get source and drain masks pixels
+        border = get_border_mask(region)
+        drain = border & (roi == e)
+        source = border & (roi > e)
+
+        replace = None
+        
+        # update source pixels and source elevation for interpolation
+        if source.any():
+            e_source = roi[source].min() + self.flat_source_tol
+            source &= (roi <= e_source)
+            eH = min(e+0.5, (e+e_source)/2.0)
+        elif self.fill_peaks:
+            replace = find_centroid(region)
+            out[replace] = e + 0.5
+            source[replace] = True
+            eH = e + 0.5
+        else:
+            return
+
+        # update drain pixels
+        if drain.any():
+            pass
+        elif bEdge:
+            # the region pixels on the edge become the drain (they drain away)
+            drain = region.copy()
+            drain[1:-1, 1:-1] = False
+            replace = drain
+            if not (region & drain).any():
+                return
+        elif self.fill_pits:
+            replace = find_centroid(region)
+            drain[replace] = True
+        else:
+            return
+
+        # fill flat area
+        dH = get_distance(region, source)
+        dL = get_distance(region, drain)
+        if replace is not None:
+            region[replace] = False
+        out[region] = (eH*dL[region] + e*dH[region]) / (dL[region] + dH[region])
+
+        # iterate to fill remaining flat areas (created during interpolation)
+        flat = (spndi.minimum_filter(out, (3, 3)) >= out) & region
+        if flat.any():
+            flats, n = spndi.label(flat, structure=FLATS_KERNEL3)
+            for i, _obj in enumerate(spndi.find_objects(flats)):
+                obj = grow_obj(_obj, roi.shape)
+                self._fill_flat(
+                    out[obj],
+                    out[obj],
+                    flats[obj] == i+1,
+                    is_edge(_obj, roi.shape),
+                    it=it+1)
+
     def calc_slopes_directions(self, plotflag=False):
         """
         Calculates the magnitude and direction of slopes and fills
         self.mag, self.direction
         """
+        
+        # TODO minimum filter behavior with nans?
+        
+        # fill/interpolate flats first
+        if self.fill_flats:
+            data = np.ma.filled(self.data.astype(float), np.nan)
+            filled = data.copy()
+
+            if self.fill_flats_below_sea: sea_mask = data != 0
+            else: sea_mask = data > 0
+
+            flat = (spndi.minimum_filter(data, (3, 3)) >= data) & sea_mask
+            flats, n = spndi.label(flat, structure=FLATS_KERNEL3)
+            objs = spndi.find_objects(flats)
+
+            for i, _obj in enumerate(objs):
+                obj = grow_obj(_obj, data.shape)
+                self._fill_flat(
+                    data[obj],
+                    filled[obj],
+                    flats[obj] == i+1,
+                    is_edge(_obj, data.shape))
+
+            self.data = np.ma.masked_array(filled, mask=np.isnan(filled))
+
         # %% Calculate the slopes and directions based on the 8 sections from
         # Tarboton http://www.neng.usu.edu/cee/faculty/dtarb/96wr03137.pdf
         if self.data.shape[0] <= self.chunk_size_slp_dir and \
@@ -829,8 +934,8 @@ class DEMProcessor(object):
 
             self.find_flats()
         else:
-            self.direction = np.ones(self.data.shape) * FLAT_ID_INT
-            self.mag = np.ones_like(self.direction) * FLAT_ID_INT
+            self.direction = np.full(self.data.shape, FLAT_ID_INT)
+            self.mag = np.full(self.data.shape, FLAT_ID_INT)
             self.flats = np.zeros(self.data.shape, bool)
             top_edge, bottom_edge = \
                 self._get_chunk_edges(self.data.shape[0],
@@ -1032,7 +1137,6 @@ class DEMProcessor(object):
                 self.edge_done = edone
 
         else:
-
             top_edge, bottom_edge = \
                 self._get_chunk_edges(self.data.shape[0], self.chunk_size_uca,
                                       self.chunk_overlap_uca)
@@ -2159,8 +2263,6 @@ def _get_flat_ids(assigned):
 
     return [I, region_ids, labels]
 
-
-@numba.jit
 def _tarboton_slopes_directions(data, dX, dY, facets, ang_adj):
     """
     Calculate the slopes and directions based on the 8 sections from
@@ -2348,7 +2450,6 @@ def _get_d1_d2(dX, dY, ind, e1, e2, shp, topbot=None):
 
 
 # Let's calculate the slopes!
-@numba.jit
 def _calc_direction(data, mag, direction, ang, d1, d2, theta,
                     slc0, slc1, slc2):
     """
