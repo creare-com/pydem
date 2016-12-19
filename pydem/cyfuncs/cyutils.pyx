@@ -4,11 +4,13 @@ Created on Tue Nov 04 17:11:16 2014
 
 @author: mpu
 """
+
 import numpy as np
 cimport numpy as np
 
 ctypedef np.int64_t DTYPEi_t
 ctypedef np.int32_t DTYPEi32_t
+
 #==============================================================================
 # Drain a single array's connections: If connected to start, change value
 #==============================================================================
@@ -96,7 +98,7 @@ def drain_area(np.ndarray[double, ndim=1] area,
                        &(edge_todo[0]), do_edge_todo,
                        &(edge_todo_no_mask[0]), do_edge_todo_no_mask,
                        skip_edge)
-    return area, done, edge_todo, edge_todo_no_mask
+    return area, done, edge_todo.astype('bool'), edge_todo_no_mask.astype('bool')
 
 
 cdef void _drain_area(double *area, DTYPEi_t* done,
@@ -206,4 +208,3 @@ cdef DTYPEi_t _check_id_on_edge(DTYPEi_t row_id, DTYPEi_t n_rows, DTYPEi_t n_col
         return 1
     else: # Otherwise, it's not on an edge
         return 0
-

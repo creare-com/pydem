@@ -345,7 +345,8 @@ def get_border_mask(region):
     """
 
     # common special case (for efficiency)
-    if region[1:-1, 1:-1].all():
+    internal = region[1:-1, 1:-1]
+    if internal.all() and internal.any():
         return ~region
     
     I, = np.where(region.ravel())
@@ -471,3 +472,93 @@ def find_centroid(region):
     w = np.argwhere(region)
     i, j = w[np.argmin(np.linalg.norm(w - (x, y), axis=1))]
     return i, j
+
+def plot_fill_flat(roi, out, region, source, drain, dL, dH):
+    from matplotlib import pyplot
+
+    plot_detail = roi.size < 500
+    cmap = 'Greens'
+
+    pyplot.figure()
+
+    ax = pyplot.subplot(221)
+    pyplot.axis('off')
+    pyplot.title('unfilled')
+    im = pyplot.imshow(roi, interpolation='none')
+    im.set_cmap(cmap)
+    if plot_detail:
+        y, x = np.where(region); pyplot.plot(x, y, 'k.')
+        y, x = np.where(source); pyplot.plot(x, y, lw=0, color='k', marker='$H$', ms=12)
+        y, x = np.where(drain);   pyplot.plot(x, y, lw=0, color='k', marker='$L$', ms=12)
+    
+    pyplot.subplot(222, sharex=ax, sharey=ax)
+    pyplot.axis('off')
+    pyplot.title('filled')
+    im = pyplot.imshow(out, interpolation='none')
+    im.set_cmap(cmap)
+    if plot_detail:
+        for elev in np.unique(out):
+            y, x = np.where(out==elev)
+            pyplot.plot(x, y, lw=0, color='k', marker='$%.3f$' % elev, ms=20)
+
+    if plot_detail:
+        flat = (minimum_filter(out, (3, 3)) >= out) & region
+        y, x = np.where(flat); pyplot.plot(x, y, 'r_', ms=24)
+        
+        pyplot.subplot(223, sharex=ax, sharey=ax)
+        pyplot.axis('off')
+        pyplot.title('dL')
+        im = pyplot.imshow(roi, interpolation='none')
+        im.set_cmap(cmap)
+        for d in np.unique(dL):
+            if d == region.size: continue
+            y, x = np.where(dL==d)
+            pyplot.plot(x, y, lw=0, color='k', marker='$%.2f$' % d, ms=24)
+
+        pyplot.subplot(224, sharex=ax, sharey=ax)
+        pyplot.axis('off')
+        pyplot.title('dH')
+        im = pyplot.imshow(roi, interpolation='none')
+        im.set_cmap(cmap)
+        for d in np.unique(dH):
+            if d == region.size: continue
+            y, x = np.where(dH==d)
+            pyplot.plot(x, y, lw=0, color='k', marker='$%.2f$' % d, ms=24)
+
+    pyplot.tight_layout()
+
+def plot_drain_pit(self, pit, drain, prop, s, elev, area):
+    from matplotlib import pyplot
+    
+    cmap = 'Greens'
+
+    ipit, jpit = np.unravel_index(pit, elev.shape)
+    Idrain, Jdrain = np.unravel_index(drain, elev.shape)
+    Iarea, Jarea = np.unravel_index(area, elev.shape)
+
+    imin = max(0, min(ipit, Idrain.min(), Iarea.min())-1)
+    imax = min(elev.shape[0], max(ipit, Idrain.max(), Iarea.max()) + 2)
+    jmin = max(0, min(jpit, Jdrain.min(), Jarea.min())-1)
+    jmax = min(elev.shape[1], max(jpit, Jdrain.max(), Jarea.max()) + 2)
+    roi = (slice(imin, imax), slice(jmin, jmax))
+
+    pyplot.figure()
+    
+    ax = pyplot.subplot(221);
+    pyplot.axis('off')
+    im = pyplot.imshow(elev[roi], interpolation='none'); im.set_cmap(cmap)
+    pyplot.plot(jpit-jmin, ipit-imin, lw=0, color='k', marker='$P$', ms=10)
+    pyplot.plot(Jarea-jmin, Iarea-imin, 'k.')
+    pyplot.plot(Jdrain-jmin, Idrain-imin, lw=0, color='k', marker='$D$', ms=10)
+
+    pyplot.subplot(223, sharex=ax, sharey=ax); pyplot.axis('off')
+    im = pyplot.imshow(elev[roi], interpolation='none'); im.set_cmap(cmap)
+    for i, j, val in zip(Idrain, Jdrain, prop):
+        pyplot.plot(j-jmin, i-imin, lw=0, color='k', marker='$%.2f$' % val, ms=16)
+
+    pyplot.subplot(224, sharex=ax, sharey=ax); pyplot.axis('off')
+    im = pyplot.imshow(elev[roi], interpolation='none'); im.set_cmap(cmap)
+    for i, j, val in zip(Idrain, Jdrain, s):
+        pyplot.plot(j-jmin, i-imin, lw=0, color='k', marker='$%.2f$' % val, ms=16)
+
+    pyplot.tight_layout()

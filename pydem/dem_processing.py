@@ -48,17 +48,8 @@ The Edge and TileEdge classes keep track of the edge information for tiles
 
 Development Notes
 ------------------
-TODO: Replace complete file loading with partial loading from disk to RAM.
-    Presently, an entire geotiff is loaded into memory, which makes the
-    chunk calculation less useful because the memory restriction is still
-    present
-
 TODO: Improve general memory usage (following from previous TODO).
-
 TODO: Cythonize magnitude and slope calculations
-
-TODO: Implement pit-removal algorithm so that we can start from raw elevation
-    tiles.
 
 Created on Wed Jun 18 14:19:04 2014
 
@@ -80,7 +71,7 @@ from taudem import taudem
 from test_pydem import get_test_data, make_file_names
 from utils import (mk_dx_dy_from_geotif_layer, get_fn,
                    is_edge, grow_obj, find_centroid,
-                   get_border_index, get_border_mask, get_distance)
+                   get_border_index, get_border_mask, get_distance, _adj)
 
 try:
     from cyfuncs import cyutils
@@ -461,9 +452,13 @@ class DEMProcessor(object):
 
     fill_flats = True
     fill_flats_below_sea = False
-    flat_source_tol = 0
+    flat_source_tol = 1
     fill_peaks = True
     fill_pits = True
+    drain_pits = True
+    drain_flats = False # will be ignored if drain_pits is True
+    pit_max_iter = 100
+    pit_max_dist = 20 # in pixel space
 
     # When resolving drainage across edges, if maximum UCA is reached, should
     # edge be marked as completed?
@@ -812,77 +807,95 @@ class DEMProcessor(object):
         self.mag[flats] = FLAT_ID
         self.flats = flats
 
-    def _fill_flat(self, roi, out, region, bEdge, it=0):
-        # TODO rivers crossing an edge or multiple edges is not well covered
-
+    def _fill_flat(self, roi, out, region, edge, it=0, debug=False):
         e = roi[region][0]
 
-        # 1-pixel special cases
-        # shapes: 3x3, 3x2 (left/right), 2x3 (top/bottom), and 2x2 (corner)
-        size = roi.size
-        if size <= 9:
+        # 1-pixel special cases (3x3, 3x2, 2x3, and 2x2)
+        if roi.size <= 9 and region.sum() == 1:
             source = roi > e
             n = source.sum()
-            if n == size-1: pass # pit
-            elif n > 0: out[region] += min(0.5, (roi[source].min() - e) / 2) # special fill case
-            elif self.fill_peaks: out[region] += 0.5 # small peak
+            if n == roi.size-1:
+                # pit
+                pass
+            elif n > 0:
+                # special fill case
+                out[region] += min(0.5, (roi[source].min() - e) / 2)
+            elif self.fill_peaks:
+                # small peak
+                out[region] += 0.5
+
             return
 
-        # get source and drain masks pixels
+        # get source and drain masks
         border = get_border_mask(region)
         drain = border & (roi == e)
         source = border & (roi > e)
 
         replace = None
         
-        # update source pixels and source elevation for interpolation
+        # update source and set eH (high elevation for interpolation)
+        
+        # if (it == 0 and drain.any() and (region & edge).any() and (region & edge & get_border_mask(source) & ~get_border_mask(drain)).any()):
+        #     # Downstream side of river beds that cross an edge: drain from edge
+        #     replace = region & edge & get_border_mask(source) & ~get_border_mask(drain)
+        #     eH = min(e + 0.5, (e+roi[source].min())/2.0)
+        #     out[replace] = eH
+        #     source = replace
+        # elif source.any():
         if source.any():
-            e_source = roi[source].min() + self.flat_source_tol
-            source &= (roi <= e_source)
-            eH = min(e+0.5, (e+e_source)/2.0)
+            # Normal case: interpolate from shallow sources (non-cliffs)
+            e_source = roi[source].min()
+            eH = min(e + 0.5, (e+e_source)/2.0)
+            source &= (roi <= e_source + self.flat_source_tol)
         elif self.fill_peaks:
-            replace = find_centroid(region)
-            out[replace] = e + 0.5
-            source[replace] = True
+            # Mountain peaks: drain from a center point in the peak
             eH = e + 0.5
+            centroid = find_centroid(region)
+            out[centroid] = eH
+            source[centroid] = True
+            replace = source
         else:
             return
 
-        # update drain pixels
+        # update drain
         if drain.any():
+            # Normal case
             pass
-        elif bEdge:
-            # the region pixels on the edge become the drain (they drain away)
-            drain = region.copy()
-            drain[1:-1, 1:-1] = False
-            replace = drain
-            if not (region & drain).any():
+        elif (region & edge).any():
+            # Upstream side of river beds that cross an edge: drain to edge
+            replace = drain = region & edge
+            if not (region & ~drain).any():
                 return
         elif self.fill_pits:
-            replace = find_centroid(region)
-            drain[replace] = True
+            # Pit area
+            centroid = find_centroid(region)
+            drain[centroid] = True
+            replace = drain
         else:
             return
 
-        # fill flat area
+        # interpolate flat area
         dH = get_distance(region, source)
         dL = get_distance(region, drain)
-        if replace is not None:
-            region[replace] = False
-        out[region] = (eH*dL[region] + e*dH[region]) / (dL[region] + dH[region])
+        if replace is None: interp = region
+        else: interp = region & ~replace
+        out[interp] = (eH*dL[interp]**2 + e*dH[interp]**2) / (dL[interp]**2 + dH[interp]**2)
 
         # iterate to fill remaining flat areas (created during interpolation)
         flat = (spndi.minimum_filter(out, (3, 3)) >= out) & region
         if flat.any():
+            out2 = out.copy()
             flats, n = spndi.label(flat, structure=FLATS_KERNEL3)
             for i, _obj in enumerate(spndi.find_objects(flats)):
                 obj = grow_obj(_obj, roi.shape)
-                self._fill_flat(
-                    out[obj],
-                    out[obj],
-                    flats[obj] == i+1,
-                    is_edge(_obj, roi.shape),
-                    it=it+1)
+                self._fill_flat(out[obj], out2[obj], flats[obj]==i+1, edge[obj])
+            out = out2
+
+        # if debug:
+        #     from matplotlib import pyplot
+        #     from utils import plot_flat
+        #     plot_flat(roi, out, region, source, drain, dL, dH)
+        #     pyplot.show()
 
     def calc_slopes_directions(self, plotflag=False):
         """
@@ -894,8 +907,12 @@ class DEMProcessor(object):
         
         # fill/interpolate flats first
         if self.fill_flats:
+            
             data = np.ma.filled(self.data.astype(float), np.nan)
             filled = data.copy()
+            
+            edge = np.ones_like(data, dtype=bool)
+            edge[1:-1, 1:-1] = False
 
             if self.fill_flats_below_sea: sea_mask = data != 0
             else: sea_mask = data > 0
@@ -906,11 +923,7 @@ class DEMProcessor(object):
 
             for i, _obj in enumerate(objs):
                 obj = grow_obj(_obj, data.shape)
-                self._fill_flat(
-                    data[obj],
-                    filled[obj],
-                    flats[obj] == i+1,
-                    is_edge(_obj, data.shape))
+                self._fill_flat(data[obj], filled[obj], flats[obj]==i+1, edge[obj])
 
             self.data = np.ma.masked_array(filled, mask=np.isnan(filled))
 
@@ -1265,7 +1278,10 @@ class DEMProcessor(object):
                 tile_edge.set_all_neighbors_data(self.uca,
                                                  edge_done, (te, be, le, re))
 
-                edge_not_done_tile[te:be, le:re] += e2doi_tile
+                try:
+                    edge_not_done_tile[te:be, le:re] += e2doi_tile
+                except:
+                    import ipdb; ipdb.set_trace() # BREAKPOINT
                 tile_edge.set_sides((te, be, le, re), e2doi, 'todo',
                                     local=True)
                 i_old = i
@@ -1812,21 +1828,30 @@ class DEMProcessor(object):
         j1 = - np.ones_like(i12)
         j2 = - np.ones_like(i12)
 
-        # make the connectivity for the non-flats
+        # make the connectivity for the non-flats/pits
         j1, j2 = self._mk_connectivity(section, i12, j1, j2)
-
-        # Now make the connectivity for the flats
-        j1, j2, mat_data, flat_i, flat_j, flat_prop = \
-            self._mk_connectivity_flats(i12, j1, j2, mat_data, flats,
-                                        elev, mag)
-
-        # %% Make the matrix and plot
         j = np.row_stack((j1, j2))
         i = np.row_stack((i12, i12))
+        
+        # connectivity for flats/pits
+        if self.drain_pits:
+            pit_i, pit_j, pit_prop, flats, mag = \
+                self._mk_connectivity_pits(i12, flats, elev, mag)
 
-        j = np.concatenate((j.ravel(), flat_j)).astype(int)
-        mat_data = np.concatenate((mat_data.ravel(), flat_prop))
-        i = np.concatenate((i.ravel(), flat_i)).astype(int)
+            j = np.concatenate([j.ravel(), pit_j]).astype(int)
+            i = np.concatenate([i.ravel(), pit_i]).astype(int)
+            mat_data = np.concatenate([mat_data.ravel(), pit_prop])
+
+        elif self.drain_flats:
+            j1, j2, mat_data, flat_i, flat_j, flat_prop = \
+                self._mk_connectivity_flats(
+                    i12, j1, j2, mat_data, flats, elev, mag)
+
+            j = np.concatenate([j.ravel(), flat_j]).astype(int)
+            i = np.concatenate([i.ravel(), flat_j]).astype(int)
+            mat_data = np.concatenate([mat_data.ravel(), flat_prop])
+
+
 
         # This prevents no-data values, remove connections when not present,
         # and makes sure that floating point precision errors do not
@@ -1949,6 +1974,86 @@ class DEMProcessor(object):
                 j2[slc0] = i12[e2[0] + shp[0], shp[1] + e2[1]]
 
         return j1, j2
+
+    def _mk_connectivity_pits(self, i12, flats, elev, mag):
+        """
+        Helper function for _mk_adjacency_matrix. This is a more general
+        version of _mk_adjacency_flats which drains pits and flats to nearby
+        but non-adjacent pixels. The slope magnitude (and flats mask) is
+        updated for these pits and flats so that the TWI can be computed.
+        """
+        
+        _, n = elev.shape
+        e = elev.data.ravel()
+
+        warn_pits = []
+
+        pit_i = []
+        pit_j = []
+        pit_prop = []
+        
+        pits = i12[flats & (elev > 0)]
+        I = np.argsort(e[pits])
+        for pit in pits[I]:
+            # find drains
+            pit_area = np.array([pit], dtype=int)
+            
+            border2 = get_border_index(pit_area, elev.shape, elev.size)
+            pit_area2 = pit_area.tolist()
+
+            drain = None
+            epit = e[pit]
+            for it in range(self.pit_max_iter):
+                border = get_border_index(pit_area, elev.shape, elev.size)
+
+                eborder = e[border]
+                emin = eborder.min()
+                if emin < epit:
+                    drain = border[eborder < epit]
+                    break
+
+                pit_area = np.concatenate([pit_area, border[eborder == emin]])
+
+            if drain is None:
+                warn_pits.append(pit)
+                continue
+            
+            ipit, jpit = np.unravel_index(pit, elev.shape)
+            Idrain, Jdrain = np.unravel_index(drain, elev.shape)
+
+            # filter by drain distance
+            # TODO use dX and dY
+            dx = np.sqrt((ipit - Idrain)**2 + (jpit-Jdrain)**2)
+            b = dx <= self.pit_max_dist
+            if not b.any():
+                warn_pits.append(pit)
+                continue
+            drain = drain[b]
+            dx = dx[b]
+
+            # slope magnitudes
+            s = (e[pit]-e[drain]) / dx
+
+            # connectivity info
+            # TODO replace the proportion?
+            pit_i += [pit for i in drain]
+            pit_j += drain.tolist()
+            pit_prop += s.tolist()
+            
+            # update pit magnitude and flats mask
+            mag[ipit, jpit] = np.mean(s)
+            flats[ipit, jpit] = False
+
+        if warn_pits:
+            warnings.warn("Warning %d pits had no place to drain to in this "
+                          "chunk" % len(warn_pits))
+        
+        # Note: returning flats and mag here is not strictly necessary
+        return (np.array(pit_i, dtype=int),
+                np.array(pit_j, dtype=int),
+                np.array(pit_prop, dtype=float),
+                flats,
+                mag)
 
     def _mk_connectivity_flats(self, i12, j1, j2, mat_data, flats, elev, mag):
         """
