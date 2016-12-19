@@ -70,8 +70,8 @@ from reader.gdal_reader import GdalReader
 from taudem import taudem
 from test_pydem import get_test_data, make_file_names
 from utils import (mk_dx_dy_from_geotif_layer, get_fn,
-                   is_edge, grow_obj, find_centroid,
-                   get_border_index, get_border_mask, get_distance, _adj)
+                   make_slice, is_edge, grow_obj, find_centroid,
+                   get_border_index, get_border_mask, get_distance)
 
 try:
     from cyfuncs import cyutils
@@ -452,13 +452,15 @@ class DEMProcessor(object):
 
     fill_flats = True
     fill_flats_below_sea = False
-    flat_source_tol = 1
-    fill_peaks = True
-    fill_pits = True
+    fill_flats_source_tol = 1
+    fill_flats_peaks = True
+    fill_flats_pits = True
+    
     drain_pits = True
     drain_flats = False # will be ignored if drain_pits is True
-    pit_max_iter = 100
-    pit_max_dist = 20 # in pixel space
+    drain_pits_max_iter = 100
+    drain_pits_max_dist = 20 # coordinate space
+    drain_pits_max_dist_XY = None # real space
 
     # When resolving drainage across edges, if maximum UCA is reached, should
     # edge be marked as completed?
@@ -820,7 +822,7 @@ class DEMProcessor(object):
             elif n > 0:
                 # special fill case
                 out[region] += min(0.5, (roi[source].min() - e) / 2)
-            elif self.fill_peaks:
+            elif self.fill_flats_peaks:
                 # small peak
                 out[region] += 0.5
 
@@ -846,8 +848,8 @@ class DEMProcessor(object):
             # Normal case: interpolate from shallow sources (non-cliffs)
             e_source = roi[source].min()
             eH = min(e + 0.5, (e+e_source)/2.0)
-            source &= (roi <= e_source + self.flat_source_tol)
-        elif self.fill_peaks:
+            source &= (roi <= e_source + self.fill_flats_source_tol)
+        elif self.fill_flats_peaks:
             # Mountain peaks: drain from a center point in the peak
             eH = e + 0.5
             centroid = find_centroid(region)
@@ -866,7 +868,7 @@ class DEMProcessor(object):
             replace = drain = region & edge
             if not (region & ~drain).any():
                 return
-        elif self.fill_pits:
+        elif self.fill_flats_pits:
             # Pit area
             centroid = find_centroid(region)
             drain[centroid] = True
@@ -1631,7 +1633,7 @@ class DEMProcessor(object):
             data, dX, dY, direction, flats)
 
         # Build the drainage or adjacency matrix
-        A = self._mk_adjacency_matrix(section, proportion, flats, data, mag)
+        A = self._mk_adjacency_matrix(section, proportion, flats, data, mag, dX, dY)
         if CYTHON:
             B = A.tocsr()
 
@@ -1812,7 +1814,7 @@ class DEMProcessor(object):
 
         return section, proportion
 
-    def _mk_adjacency_matrix(self, section, proportion, flats, elev, mag):
+    def _mk_adjacency_matrix(self, section, proportion, flats, elev, mag, dX, dY):
         """
         Calculates the adjacency of connectivity matrix. This matrix tells
         which pixels drain to which.
@@ -1836,7 +1838,7 @@ class DEMProcessor(object):
         # connectivity for flats/pits
         if self.drain_pits:
             pit_i, pit_j, pit_prop, flats, mag = \
-                self._mk_connectivity_pits(i12, flats, elev, mag)
+                self._mk_connectivity_pits(i12, flats, elev, mag, dX, dY)
 
             j = np.concatenate([j.ravel(), pit_j]).astype(int)
             i = np.concatenate([i.ravel(), pit_i]).astype(int)
@@ -1975,7 +1977,7 @@ class DEMProcessor(object):
 
         return j1, j2
 
-    def _mk_connectivity_pits(self, i12, flats, elev, mag):
+    def _mk_connectivity_pits(self, i12, flats, elev, mag, dX, dY):
         """
         Helper function for _mk_adjacency_matrix. This is a more general
         version of _mk_adjacency_flats which drains pits and flats to nearby
@@ -1983,14 +1985,12 @@ class DEMProcessor(object):
         updated for these pits and flats so that the TWI can be computed.
         """
         
-        _, n = elev.shape
         e = elev.data.ravel()
-
-        warn_pits = []
 
         pit_i = []
         pit_j = []
         pit_prop = []
+        warn_pits = []
         
         pits = i12[flats & (elev > 0)]
         I = np.argsort(e[pits])
@@ -2003,7 +2003,7 @@ class DEMProcessor(object):
 
             drain = None
             epit = e[pit]
-            for it in range(self.pit_max_iter):
+            for it in range(self.drain_pits_max_iter):
                 border = get_border_index(pit_area, elev.shape, elev.size)
 
                 eborder = e[border]
@@ -2021,21 +2021,34 @@ class DEMProcessor(object):
             ipit, jpit = np.unravel_index(pit, elev.shape)
             Idrain, Jdrain = np.unravel_index(drain, elev.shape)
 
-            # filter by drain distance
-            # TODO use dX and dY
-            dx = np.sqrt((ipit - Idrain)**2 + (jpit-Jdrain)**2)
-            b = dx <= self.pit_max_dist
-            if not b.any():
-                warn_pits.append(pit)
-                continue
-            drain = drain[b]
-            dx = dx[b]
+            # filter by drain distance in coordinate space
+            if self.drain_pits_max_dist:
+                dij = np.sqrt((ipit - Idrain)**2 + (jpit-Jdrain)**2)
+                b = dij <= self.drain_pits_max_dist
+                if not b.any():
+                    warn_pits.append(pit)
+                    continue
+                drain = drain[b]
+            
+            # calculate real distances
+            dx = [dX[make_slice(ipit, idrain)].sum() for idrain in Idrain]
+            dy = [dY[make_slice(jpit, jdrain)].sum() for jdrain in Jdrain]
+            dxy = np.sqrt(np.array(dx)**2 + np.array(dy)**2)
 
-            # slope magnitudes
-            s = (e[pit]-e[drain]) / dx
+            # filter by drain distance in real space
+            if self.drain_pits_max_dist_XY:
+                b = dxy <= self.drain_pits_max_dist_XY
+                if not b.any():
+                    warn_pits.append(pit)
+                    continue
+                drain = drain[b]
+                dxy = dxy[b]
+            
+            # calculate manitudes
+            s = (e[pit]-e[drain]) / dxy
 
             # connectivity info
-            # TODO replace the proportion?
+            # TODO proportion calculation (_mk_connectivity_flats used elev?)
             pit_i += [pit for i in drain]
             pit_j += drain.tolist()
             pit_prop += s.tolist()

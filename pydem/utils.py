@@ -391,6 +391,12 @@ def get_distance(region, src):
             break
     return d
 
+def make_slice(a, b):
+    if a < b:
+        return slice(a, b)
+    else:
+        return slice(b, a)
+
 def grow_slice(slc, size):
     """
     Grow a slice object by 1 in each direction without overreaching the list.
