@@ -1409,7 +1409,7 @@ class DEMProcessor(object):
             data, dX, dY, direction, flats)
 
         # Build the drainage or adjacency matrix
-        A = self._mk_adjacency_matrix(section, proportion, flats, data, mag)
+        A = self._mk_adjacency_matrix(section, proportion, flats, data, mag, dX, dY)
         if CYTHON:
             B = A
             C = A.tocsr()
@@ -2029,6 +2029,8 @@ class DEMProcessor(object):
                     warn_pits.append(pit)
                     continue
                 drain = drain[b]
+                Idrain = Idrain[b]
+                Jdrain = Jdrain[b]
             
             # calculate real distances
             dx = [dX[make_slice(ipit, idrain)].sum() for idrain in Idrain]
@@ -2044,7 +2046,7 @@ class DEMProcessor(object):
                 drain = drain[b]
                 dxy = dxy[b]
             
-            # calculate manitudes
+            # calculate magnitudes
             s = (e[pit]-e[drain]) / dxy
 
             # connectivity info
