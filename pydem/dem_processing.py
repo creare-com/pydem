@@ -70,8 +70,8 @@ from reader.gdal_reader import GdalReader
 from taudem import taudem
 from test_pydem import get_test_data, make_file_names
 from utils import (mk_dx_dy_from_geotif_layer, get_fn,
-                   make_slice, is_edge, grow_obj, find_centroid,
-                   get_border_index, get_border_mask, get_distance)
+                   make_slice, is_edge, grow_obj, find_centroid, get_distance,
+                   get_border_index, get_border_mask, get_adjacent_index)
 
 try:
     from cyfuncs import cyutils
@@ -803,8 +803,7 @@ class DEMProcessor(object):
             arr1[te+i1:be+i2, le+j1:re+j2] = arr2[i1:i2b, j1:j2b]
 
     def find_flats(self):
-        flats = self._find_flats_edges(self.data, self.dX, self.dY,
-                                       self.mag, self.direction)
+        flats = self._find_flats_edges(self.data, self.mag, self.direction)
         self.direction[flats] = FLAT_ID
         self.mag[flats] = FLAT_ID
         self.flats = flats
@@ -918,8 +917,8 @@ class DEMProcessor(object):
 
             if self.fill_flats_below_sea: sea_mask = data != 0
             else: sea_mask = data > 0
-
             flat = (spndi.minimum_filter(data, (3, 3)) >= data) & sea_mask
+
             flats, n = spndi.label(flat, structure=FLATS_KERNEL3)
             objs = spndi.find_objects(flats)
 
@@ -967,9 +966,8 @@ class DEMProcessor(object):
                                                 self.dY[te:be-1])
 
                     flats = self._find_flats_edges(self.data[te:be, le:re],
-                                                   self.dX[te:be-1],
-                                                   self.dY[te:be-1], mag,
-                                                   direction)
+                                                   mag, direction)
+
                     direction[flats] = FLAT_ID
                     mag[flats] = FLAT_ID
                     self._assign_chunk(self.data, self.mag, mag,
@@ -1021,7 +1019,7 @@ class DEMProcessor(object):
 
         return mag, direction
 
-    def _find_flats_edges(self, data, dX, dY, mag, direction):
+    def _find_flats_edges(self, data, mag, direction):
         """
         Extend flats 1 square downstream
         Flats on the downstream side of the flat might find a valid angle,
@@ -1029,32 +1027,22 @@ class DEMProcessor(object):
         these and then set them equal to a flat
         """
 
-        flats = mag == FLAT_ID_INT
-        assigned, n_flats = spndi.label(flats, FLATS_KERNEL3)
-        # Perhaps the code below will be faster?
-#        edges = ndimage.convolve(flats, FLATS_KERNEL1) - flats
-#        edges = ndimage.convolve(edges, FLATS_KERNEL1) & flats
-#        assigned, n_flats = spndi.label(edges, FLATS_KERNEL3)
-        nn, mm = flats.shape
-        flat_ids, flat_coords, flat_labelsf = _get_flat_ids(assigned)
-        for ii in xrange(n_flats):
-            ids_flats = flat_ids[flat_coords[ii]:flat_coords[ii+1]]
-            elev_flat = data.ravel()[flat_ids[flat_coords[ii]]]
-            if elev_flat is np.ma.masked:
-                continue
-            j = ids_flats % mm
-            i = ids_flats // mm
-            for iii in [-1, 0, 1]:
-                for jjj in [-1, 0, 1]:
-                    i_2 = i + iii
-                    j_2 = j + jjj
+        i12 = np.arange(data.size).reshape(data.shape)
 
-                    ids_tmp = (i_2 >= 0) & (j_2 >= 0) & (i_2 < nn) & (j_2 < mm)
-                    ids_tmp2 = data[i_2[ids_tmp], j_2[ids_tmp]] == elev_flat
-                    flats[i_2[ids_tmp][ids_tmp2], j_2[ids_tmp][ids_tmp2]]\
-                        += FLATS_KERNEL3[iii+1, jjj+1]
+        flat = mag == FLAT_ID_INT
+        flats, n = spndi.label(flat, structure=FLATS_KERNEL3)
+        objs = spndi.find_objects(flats)
 
-        return flats
+        f = flat.ravel()
+        d = data.ravel()
+        for i, _obj in enumerate(objs):
+            region = flats[_obj] == i+1
+            I = i12[_obj][region]
+            J = get_adjacent_index(I, data.shape, data.size)
+            f[J] = d[J] == d[I[0]]
+
+        flat = f.reshape(data.shape)
+        return flat
 
     def calc_uca(self, plotflag=False, edge_init_data=None, uca_init=None):
         """Calculates the upstream contributing area.
@@ -1997,9 +1985,6 @@ class DEMProcessor(object):
         for pit in pits[I]:
             # find drains
             pit_area = np.array([pit], dtype=int)
-            
-            border2 = get_border_index(pit_area, elev.shape, elev.size)
-            pit_area2 = pit_area.tolist()
 
             drain = None
             epit = e[pit]

@@ -257,7 +257,7 @@ def sortrows(a, i=0, index_out=False, recurse=True):
     else:
         return a
 
-def _adj(I, shape, size):
+def get_adjacent_index(I, shape, size):
     """
     Find indices 2d-adjacent to those in I. Helper function for get_border*.
 
@@ -319,7 +319,7 @@ def get_border_index(I, shape, size):
         indices orthogonally and diagonally bordering I
     """
 
-    J = _adj(I, shape, size)
+    J = get_adjacent_index(I, shape, size)
 
     # instead of setdiff?
     # border = np.zeros(size)
@@ -350,7 +350,7 @@ def get_border_mask(region):
         return ~region
     
     I, = np.where(region.ravel())
-    J = _adj(I, region.shape, region.size)
+    J = get_adjacent_index(I, region.shape, region.size)
 
     border = np.zeros(region.size, dtype='bool')
     border[J] = 1
