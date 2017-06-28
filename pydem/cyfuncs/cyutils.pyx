@@ -89,7 +89,7 @@ def drain_area(np.ndarray[double, ndim=1] area,
     else:
         do_edge_todo_no_mask = 1
 
-    cdef np.ndarray[DTYPEi_t, ndim=1] ids_old = np.zeros(n_ids, dtype=int)
+    cdef np.ndarray[DTYPEi_t, ndim=1] ids_old = np.zeros(n_ids, dtype=np.int64)
 
     _drain_area(&(area[0]), &(done[0]), &(ids[0]), &(ids_old[0]),
                        &(col_indptr[0]), &(col_indices[0]), &(col_data[0]),

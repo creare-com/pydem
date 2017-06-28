@@ -1401,7 +1401,7 @@ class DEMProcessor(object):
         if CYTHON:
             B = A
             C = A.tocsr()
-        if 1:  # not CYTHON:
+        if not CYTHON:
             A = A.tocoo()
 
         ids = np.zeros(data.shape, bool)
@@ -1675,13 +1675,13 @@ class DEMProcessor(object):
             count += 1
             if CYTHON:
                 a, b, c, d = cyutils.drain_area(area.ravel(),
-                                                done.astype(int).ravel(),
-                                                ids.astype(int),
+                                                done.astype('i8').ravel(),
+                                                ids.astype('i8'),
                                                 A.indptr, A.indices, A.data,
                                                 B.indptr, B.indices,
                                                 area.shape[0], area.shape[1],
-                                                edge_todo.astype(float).ravel(),
-                                                edge_todo_no_mask.astype(float).ravel())
+                                                edge_todo.astype('f8').ravel(),
+                                                edge_todo_no_mask.astype('f8').ravel())
                 area = a.reshape(area.shape)
                 done = b.reshape(done.shape).astype(bool)
                 edge_todo = c.reshape(edge_todo.shape).astype(bool)
@@ -2018,8 +2018,8 @@ class DEMProcessor(object):
                 Jdrain = Jdrain[b]
             
             # calculate real distances
-            dx = [dX[make_slice(ipit, idrain)].sum() for idrain in Idrain]
-            dy = [dY[make_slice(jpit, jdrain)].sum() for jdrain in Jdrain]
+            dx = [dX[make_slice(jpit, jdrain)].sum() for jdrain in Jdrain]
+            dy = [dY[make_slice(ipit, idrain)].sum() for idrain in Idrain]
             dxy = np.sqrt(np.array(dx)**2 + np.array(dy)**2)
 
             # filter by drain distance in real space
