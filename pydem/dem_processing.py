@@ -2018,7 +2018,8 @@ class DEMProcessor(object):
                 Jdrain = Jdrain[b]
             
             # calculate real distances
-            dx = [dX[make_slice(ipit, idrain)].sum() for idrain in Idrain]
+            dx = [dX[make_slice(ipit, idrain)].mean() * np.abs(jpit - jdrain)\
+                  for idrain, jdrain in zip(Idrain, Jdrain)]
             dy = [dY[make_slice(ipit, idrain)].sum() for idrain in Idrain]
             dxy = np.sqrt(np.array(dx)**2 + np.array(dy)**2)
 
