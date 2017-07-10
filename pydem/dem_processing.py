@@ -66,7 +66,8 @@ import subprocess
 import scipy.sparse as sps
 import scipy.ndimage as spndi
 
-from reader.gdal_reader import GdalReader
+from reader.gdal_reader import GdalReader, InputRasterDataLayer
+from reader.my_types import grid_coords_from_corners, Point
 from taudem import taudem
 from test_pydem import get_test_data, make_file_names
 from utils import (mk_dx_dy_from_geotif_layer, get_fn,
@@ -538,18 +539,23 @@ class DEMProcessor(object):
         """
         Parameters
         -----------
-        file_name : str
-            File name of elevation data
+        file_name : str, np.ndarray, tuple
+            If isinstance(str): filename of of elevation data
+            If isinstance(np.ndarray): a numpy array containing elevation data
+            If isinstance(tuple): (elev, lat, lon), three numpy arrays containing
+                elevation data, the latitude (rows), and longitude (columns) of the array.
+                Note: only the max and min values of the latitude and longitude inputs are used.
         dx_dy_from_file : bool, optional
             Default True. If true, will extract coordinates from geotiff file
             and use those to calculate the magnitude/direction of slopes.
-            Otherwise assumes rectangular (uniform) coordinates.
+            Otherwise assumes rectangular (uniform) coordinates. This flag is not
+            used if file_name is not a string.
         plotflag : bool, optional
             Default False: If True, will plot debug image. For a large
             file this is not advised.
         """
         # %%
-        if os.path.exists(file_name):
+        if isinstance(file_name, str) and os.path.exists(file_name):
             elev_file = GdalReader(file_name=file_name)
             elev, = elev_file.raster_layers
             data = elev.raster_data
@@ -566,13 +572,32 @@ class DEMProcessor(object):
                                                | (self.data < -9998))
             del elev_file  # close the file
             self.file_name = file_name
+        elif isinstance(file_name, np.ndarray): #elevation data given directly
+            self.data = file_name
+            dX = np.ones(self.data.shape[0] - 1) / self.data.shape[1]  #dX only changes in latitude
+            dY = np.ones(self.data.shape[0] - 1) / self.data.shape[0]
+            # Need to spoof elev
+            elev = InputRasterDataLayer()
+            ulc = Point(lat=1, lon=0)
+            lrc = Point(lat=0, lon=1)
+            elev.grid_coordinates = grid_coords_from_corners(ulc, lrc, self.data.shape)
+            self.elev = elev
+        elif isinstance(file_name, tuple): #elevation data given directly
+            self.data, lat, lon = file_name
+            # Need to spoof elev
+            elev = InputRasterDataLayer()
+            ulc = Point(lat=np.nanmax(lat), lon=np.nanmin(lon))
+            lrc = Point(lat=np.nanmin(lat), lon=np.nanmax(lon))
+            elev.grid_coordinates = grid_coords_from_corners(ulc, lrc, self.data.shape)
+            dX, dY = mk_dx_dy_from_geotif_layer(elev)
+            self.elev = elev
 
         shp = np.array(self.data.shape) - 1
-        if dx_dy_from_file == 'test':  # This is a hidden option for dev/test
+        if isinstance(file_name, str) and dx_dy_from_file == 'test':  # This is a hidden option for dev/test
             # dX = np.linspace(0.9, 1.1, data.shape[0] - 1)
             dY = np.linspace(0.9, 0.9, data.shape[0] - 1)
             dX = np.ones((data.shape[0] - 1), 'float64') / TEST_DIV
-        elif dx_dy_from_file:
+        elif isinstance(file_name, str) and dx_dy_from_file:
             dX, dY = mk_dx_dy_from_geotif_layer(elev)
 
             if plotflag:
@@ -581,7 +606,7 @@ class DEMProcessor(object):
                 y = np.dot(np.arange(1, 10)[:, None], dY[None, :])
                 plot(x.ravel(), y.ravel(), '.')
                 gca().invert_yaxis()
-        else:
+        elif isinstance(file_name, str):
             dX = np.ones((data.shape[0]-1), 'float64') / (shp[1])
             dY = np.ones((data.shape[0]-1), 'float64') / (shp[0])
         if dx_dy_from_file == 'hack':
