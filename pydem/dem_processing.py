@@ -111,7 +111,7 @@ class Edge(object):
         self.todo = np.ones(size, bool)
         self.done = np.zeros(size, bool)
         self.slice = slice_
-        self.data = np.zeros(size, float)
+        self.data = np.zeros(size, 'float64')
 
     @property
     def n_done(self):
@@ -188,10 +188,10 @@ class TileEdge(object):
         right = np.empty((left_edge.size, top_edge.size), Edge)
         top = np.empty((left_edge.size, top_edge.size), Edge)
         bottom = np.empty((left_edge.size, top_edge.size), Edge)
-        n_done = np.zeros(left.shape, int)
-        self.percent_done = np.zeros(left.shape, float)
-        self.n_todo = np.zeros(left.shape, int)
-        max_elev = np.zeros(left.shape, float)
+        n_done = np.zeros(left.shape, 'int64')
+        self.percent_done = np.zeros(left.shape, 'float64')
+        self.n_todo = np.zeros(left.shape, 'int64')
+        max_elev = np.zeros(left.shape, 'float64')
         for tb in xrange(top_edge.size):
             for lr in xrange(left_edge.size):
                 te = top_edge[tb]
@@ -571,7 +571,7 @@ class DEMProcessor(object):
         if dx_dy_from_file == 'test':  # This is a hidden option for dev/test
             # dX = np.linspace(0.9, 1.1, data.shape[0] - 1)
             dY = np.linspace(0.9, 0.9, data.shape[0] - 1)
-            dX = np.ones((data.shape[0] - 1)) / TEST_DIV
+            dX = np.ones((data.shape[0] - 1), 'float64') / TEST_DIV
         elif dx_dy_from_file:
             dX, dY = mk_dx_dy_from_geotif_layer(elev)
 
@@ -582,8 +582,8 @@ class DEMProcessor(object):
                 plot(x.ravel(), y.ravel(), '.')
                 gca().invert_yaxis()
         else:
-            dX = np.ones((data.shape[0]-1)) / (shp[1])
-            dY = np.ones((data.shape[0]-1)) / (shp[0])
+            dX = np.ones((data.shape[0]-1), 'float64') / (shp[1])
+            dY = np.ones((data.shape[0]-1), 'float64') / (shp[0])
         if dx_dy_from_file == 'hack':
             dx = np.mean([dX.mean(), dY.mean()])
             dX[:] = dx
@@ -777,26 +777,31 @@ class DEMProcessor(object):
             Default False. If true, the data in arr2 will be added to arr1,
             otherwise data in arr2 will overwrite data in arr1
         """
+        
         if te == 0:
             i1 = 0
         else:
             i1 = ovr
+        
         if be == data.shape[0]:
             i2 = 0
             i2b = None
         else:
             i2 = -ovr
             i2b = -ovr
+        
         if le == 0:
             j1 = 0
         else:
             j1 = ovr
+        
         if re == data.shape[1]:
             j2 = 0
             j2b = None
         else:
             j2 = -ovr
             j2b = -ovr
+
         if add:
             arr1[te+i1:be+i2, le+j1:re+j2] += arr2[i1:i2b, j1:j2b]
         else:
@@ -804,8 +809,8 @@ class DEMProcessor(object):
 
     def find_flats(self):
         flats = self._find_flats_edges(self.data, self.mag, self.direction)
-        self.direction[flats] = FLAT_ID
-        self.mag[flats] = FLAT_ID
+        self.direction[flats] = FLAT_ID_INT
+        self.mag[flats] = FLAT_ID_INT
         self.flats = flats
 
     def _fill_flat(self, roi, out, region, edge, it=0, debug=False):
@@ -908,11 +913,10 @@ class DEMProcessor(object):
         
         # fill/interpolate flats first
         if self.fill_flats:
-            
-            data = np.ma.filled(self.data.astype(float), np.nan)
+            data = np.ma.filled(self.data.astype('float64'), np.nan)
             filled = data.copy()
             
-            edge = np.ones_like(data, dtype=bool)
+            edge = np.ones_like(data, bool)
             edge[1:-1, 1:-1] = False
 
             if self.fill_flats_below_sea: sea_mask = data != 0
@@ -926,7 +930,7 @@ class DEMProcessor(object):
                 obj = grow_obj(_obj, data.shape)
                 self._fill_flat(data[obj], filled[obj], flats[obj]==i+1, edge[obj])
 
-            self.data = np.ma.masked_array(filled, mask=np.isnan(filled))
+            self.data = np.ma.masked_array(filled, mask=np.isnan(filled)).astype(self.data.dtype)
 
         # %% Calculate the slopes and directions based on the 8 sections from
         # Tarboton http://www.neng.usu.edu/cee/faculty/dtarb/96wr03137.pdf
@@ -942,8 +946,8 @@ class DEMProcessor(object):
 
             self.find_flats()
         else:
-            self.direction = np.full(self.data.shape, FLAT_ID_INT)
-            self.mag = np.full(self.data.shape, FLAT_ID_INT)
+            self.direction = np.full(self.data.shape, FLAT_ID_INT, 'float64')
+            self.mag = np.full(self.data.shape, FLAT_ID_INT, 'float64')
             self.flats = np.zeros(self.data.shape, bool)
             top_edge, bottom_edge = \
                 self._get_chunk_edges(self.data.shape[0],
@@ -968,8 +972,8 @@ class DEMProcessor(object):
                     flats = self._find_flats_edges(self.data[te:be, le:re],
                                                    mag, direction)
 
-                    direction[flats] = FLAT_ID
-                    mag[flats] = FLAT_ID
+                    direction[flats] = FLAT_ID_INT
+                    mag[flats] = FLAT_ID_INT
                     self._assign_chunk(self.data, self.mag, mag,
                                        te, be, le, re, ovr)
                     self._assign_chunk(self.data, self.direction, direction,
@@ -1007,8 +1011,8 @@ class DEMProcessor(object):
         """
         shp = np.array(data.shape) - 1
 
-        direction = np.ones(data.shape) * FLAT_ID_INT
-        mag = np.ones_like(direction) * FLAT_ID_INT
+        direction = np.full(data.shape, FLAT_ID_INT, 'float64')
+        mag = np.full(direction, FLAT_ID_INT, 'float64')
 
         ind = 0
         d1, d2, theta = _get_d1_d2(dX, dY, ind, [0, 1], [1, 1], shp)
@@ -1082,9 +1086,9 @@ class DEMProcessor(object):
             self.calc_slopes_directions()
 
         # Initialize the upstream area
-        uca_edge_init = np.zeros(self.data.shape)
-        uca_edge_done = np.zeros(self.data.shape, dtype=bool)
-        uca_edge_todo = np.zeros(self.data.shape, dtype=bool)
+        uca_edge_init = np.zeros(self.data.shape, 'float64')
+        uca_edge_done = np.zeros(self.data.shape, bool)
+        uca_edge_todo = np.zeros(self.data.shape, bool)
         edge_init_done, edge_init_todo = None, None
         if edge_init_data is not None:
             edge_init_data, edge_init_done, edge_init_todo = edge_init_data
@@ -1103,9 +1107,9 @@ class DEMProcessor(object):
                     edge_init_todo[key].reshape(uca_edge_init[val].shape)
 
         if uca_init is None:
-            self.uca = np.ones(self.data.shape) * FLAT_ID_INT
+            self.uca = np.full(self.data.shape, FLAT_ID_INT, 'float64')
         else:
-            self.uca = uca_init
+            self.uca = uca_init.astype('float64')
 
         if self.data.shape[0] <= self.chunk_size_uca and \
                 self.data.shape[1] <= self.chunk_size_uca:
@@ -1405,7 +1409,7 @@ class DEMProcessor(object):
             A = A.tocoo()
 
         ids = np.zeros(data.shape, bool)
-        area = np.zeros(data.shape, float)
+        area = np.zeros(data.shape, 'float64')
         # Set the ids to the edges that are now done, and initialize the
         # edge area
         if tile_edge is not None:
@@ -1471,12 +1475,11 @@ class DEMProcessor(object):
                     arr.ravel()[rows_id] = False  # Set second arrival new id
 
             return arr
+
         if CYTHON:
-            a = cyutils.drain_connections(done.ravel().astype(int),
-                                          ids.astype(int), B.indptr, B.indices,
-                                          set_to=False)
-            a = a.reshape(done.shape)
-            done = a.astype(bool)
+            a = cyutils.drain_connections(
+                done.ravel(), ids, B.indptr, B.indices, set_to=False)
+            done = a.reshape(done.shape).astype(bool)
         else:
             done = drain_pixels_done(ids, done, A.row, A.col)
 
@@ -1544,18 +1547,18 @@ class DEMProcessor(object):
         if CYTHON:
             if edge_todo_tile is not None:
                 a, b, c, d = cyutils.drain_area(area.ravel(),
-                                                done.astype(int).ravel(),
-                                                ids.astype(int),
+                                                done.ravel(),
+                                                ids,
                                                 B.indptr, B.indices, B.data,
                                                 C.indptr, C.indices,
                                                 area.shape[0], area.shape[1],
-                                                edge_todo_tile.astype(float).ravel(),
+                                                edge_todo_tile.astype('float64').ravel(),
                                                 skip_edge=True)
                 edge_todo_tile = c.reshape(edge_todo_tile.shape)
             else:
                 a, b, c, d = cyutils.drain_area(area.ravel(),
-                                                done.astype(int).ravel(),
-                                                ids.astype(int),
+                                                done.ravel(),
+                                                ids,
                                                 B.indptr, B.indices, B.data,
                                                 C.indptr, C.indices,
                                                 area.shape[0], area.shape[1],
@@ -1594,12 +1597,12 @@ class DEMProcessor(object):
 #                #Follow the drainage along. New candidates are cells that just changed
 #                ids = (edge_todo_old.ravel() != arr.ravel())
             return arr
+        
         if CYTHON:
-            a = cyutils.drain_connections(edge_todo.ravel().astype(int),
-                                          ids.astype(int), B.indptr, B.indices,
+            a = cyutils.drain_connections(edge_todo.ravel(),
+                                          ids, B.indptr, B.indices,
                                           set_to=True)
-            a = a.reshape(edge_todo.shape)
-            edge_todo = (a.astype(bool))
+            edge_todo = a.reshape(edge_todo.shape).astype(bool)
         else:
             edge_todo = drain_pixels_todo(ids, edge_todo, A.row, A.col)
 
@@ -1670,23 +1673,23 @@ class DEMProcessor(object):
         ids_old = np.zeros_like(ids)
         # %%
         count = 1
+        
+        if CYTHON:
+            area_ = area.ravel()
+            done_ = done.ravel()
+            edge_todo_ = edge_todo.astype('float64').ravel()
+            edge_todo_no_mask_ = edge_todo_no_mask.astype('float64').ravel()
+        data_ = data.ravel()
+
         while (np.any(~done) and count < self.circular_ref_maxcount):
             print ".",
             count += 1
             if CYTHON:
-                a, b, c, d = cyutils.drain_area(area.ravel(),
-                                                done.astype('i8').ravel(),
-                                                ids.astype('i8'),
-                                                A.indptr, A.indices, A.data,
-                                                B.indptr, B.indices,
-                                                area.shape[0], area.shape[1],
-                                                edge_todo.astype('f8').ravel(),
-                                                edge_todo_no_mask.astype('f8').ravel())
-                area = a.reshape(area.shape)
-                done = b.reshape(done.shape).astype(bool)
-                edge_todo = c.reshape(edge_todo.shape).astype(bool)
-                edge_todo_no_mask = \
-                    d.reshape(edge_todo_no_mask.shape).astype(bool)
+                area_, done_, edge_todo_, edge_todo_no_mask_ = cyutils.drain_area(area_,
+                    done_, ids,
+                    A.indptr, A.indices, A.data, B.indptr, B.indices,
+                    area.shape[0], area.shape[1],
+                    edge_todo_, edge_todo_no_mask_)
             else:
                 # If I use ids.sum() > 0 then I might get stuck in
                 # circular references.
@@ -1698,10 +1701,17 @@ class DEMProcessor(object):
     #                figure(1);clf();imshow(area, interpolation='none');colorbar()
     #                figure(2);clf();imshow(ids.reshape(area.shape), interpolation='none');colorbar()
     #                figure(3);clf();imshow(done, interpolation='none');colorbar()
+                done_ = done.ravel()
             #%%
             ids[:] = False
-            max_elev = (data * (~done)).max()
-            ids[((data * (~done) - max_elev) / max_elev > -0.01).ravel()] = True
+            max_elev = (data_ * (~done_)).max()
+            ids[((data_ * (~done_) - max_elev) / max_elev > -0.01)] = True
+
+        if CYTHON:
+            area = area_.reshape(area.shape)
+            done = done_.reshape(done.shape)
+            edge_todo = edge_todo_.reshape(edge_todo.shape).astype(bool)
+            edge_todo_no_mask = edge_todo_no_mask_.reshape(edge_todo_no_mask.shape).astype(bool)
 
         area[flats] = np.nan
 
@@ -1715,8 +1725,9 @@ class DEMProcessor(object):
 
         # %%
         if plotflag:
-            self._plot_connectivity(A, (done.astype(float) is False)
-                                    + flats.astype(float) * 2, [0, 3])
+            # TODO DTYPE
+            self._plot_connectivity(A, (done.astype('float64') is False)
+                                    + flats.astype('float64') * 2, [0, 3])
         return area, edge_todo_i, edge_done, edge_todo_i_no_mask, edge_todo_no_mask
 
     def _drain_step(self, A, ids, area, done, edge_todo):
@@ -1765,10 +1776,10 @@ class DEMProcessor(object):
         if dX.size > 1:
             theta = np.row_stack((theta[0, :], theta, theta[-1, :]))
         # Which quadrant am I in?
-        section = ((direction / np.pi * 2.0) // 1).astype(int)
+        section = ((direction / np.pi * 2.0) // 1).astype('int8') # TODO DTYPE
         # Gets me in the quadrant
         quadrant = (direction - np.pi / 2.0 * section)
-        proportion = np.zeros_like(quadrant) * np.nan
+        proportion = np.full_like(quadrant, np.nan)
         # Now which section within the quadrant
         section = section * 2 \
             + (quadrant > theta.repeat(data.shape[1], 1)) * (section % 2 == 0) \
@@ -1828,8 +1839,8 @@ class DEMProcessor(object):
             pit_i, pit_j, pit_prop, flats, mag = \
                 self._mk_connectivity_pits(i12, flats, elev, mag, dX, dY)
 
-            j = np.concatenate([j.ravel(), pit_j]).astype(int)
-            i = np.concatenate([i.ravel(), pit_i]).astype(int)
+            j = np.concatenate([j.ravel(), pit_j]).astype('int64')
+            i = np.concatenate([i.ravel(), pit_i]).astype('int64')
             mat_data = np.concatenate([mat_data.ravel(), pit_prop])
 
         elif self.drain_flats:
@@ -1837,8 +1848,8 @@ class DEMProcessor(object):
                 self._mk_connectivity_flats(
                     i12, j1, j2, mat_data, flats, elev, mag)
 
-            j = np.concatenate([j.ravel(), flat_j]).astype(int)
-            i = np.concatenate([i.ravel(), flat_j]).astype(int)
+            j = np.concatenate([j.ravel(), flat_j]).astype('int64')
+            i = np.concatenate([i.ravel(), flat_j]).astype('int64')
             mat_data = np.concatenate([mat_data.ravel(), flat_prop])
 
 
@@ -1984,7 +1995,7 @@ class DEMProcessor(object):
         I = np.argsort(e[pits])
         for pit in pits[I]:
             # find drains
-            pit_area = np.array([pit], dtype=int)
+            pit_area = np.array([pit], 'int64')
 
             drain = None
             epit = e[pit]
@@ -2018,7 +2029,7 @@ class DEMProcessor(object):
                 Jdrain = Jdrain[b]
             
             # calculate real distances
-            dx = [dX[make_slice(ipit, idrain)].mean() * np.abs(jpit - jdrain)\
+            dx = [_get_dX_mean(dX, ipit, idrain) * (jpit - jdrain)
                   for idrain, jdrain in zip(Idrain, Jdrain)]
             dy = [dY[make_slice(ipit, idrain)].sum() for idrain in Idrain]
             dxy = np.sqrt(np.array(dx)**2 + np.array(dy)**2)
@@ -2050,9 +2061,9 @@ class DEMProcessor(object):
                           "chunk" % len(warn_pits))
         
         # Note: returning flats and mag here is not strictly necessary
-        return (np.array(pit_i, dtype=int),
-                np.array(pit_j, dtype=int),
-                np.array(pit_prop, dtype=float),
+        return (np.array(pit_i, 'int64'),
+                np.array(pit_j, 'int64'),
+                np.array(pit_prop, 'float64'),
                 flats,
                 mag)
 
@@ -2176,17 +2187,16 @@ class DEMProcessor(object):
             if len(loc_proportions > 2):
                 flat_j[ii] = drain_ids[2:]
                 flat_prop[ii] = loc_proportions[2:]
-                flat_i[ii] = np.ones(drain_ids[2:].size, int)\
-                    * ids_flats[one_id]
+                flat_i[ii] = np.ones(drain_ids[2:].size, 'int64') * ids_flats[one_id]
         try:
             flat_j = np.concatenate([fj for fj in flat_j if fj is not None])
             flat_prop = \
                 np.concatenate([fp for fp in flat_prop if fp is not None])
             flat_i = np.concatenate([fi for fi in flat_i if fi is not None])
         except:
-            flat_j = np.array([], dtype=int)
-            flat_prop = np.array([], dtype=float)
-            flat_i = np.array([], dtype=int)
+            flat_j = np.array([], 'int64')
+            flat_prop = np.array([], 'float64')
+            flat_i = np.array([], 'int64')
 
         if len(warn_flats) > 0:
             warnings.warn("Warning %d flats had no place" % len(warn_flats) +
@@ -2349,7 +2359,7 @@ def _get_flat_ids(assigned):
     # MPU optimization:
     # Let's segment the regions and store in a sparse format
     # First, let's use where once to find all the information we want
-    ids_labels = np.arange(len(assigned.ravel()), dtype=int)
+    ids_labels = np.arange(len(assigned.ravel()), 'int64')
     I = ids_labels[assigned.ravel().astype(bool)]
     labels = assigned.ravel()[I]
     # Now sort these arrays by the label to figure out where to segment
@@ -2371,8 +2381,8 @@ def _tarboton_slopes_directions(data, dX, dY, facets, ang_adj):
     shp = np.array(data.shape) - 1
 
 
-    direction = np.ones(data.shape) * FLAT_ID_INT
-    mag = np.ones_like(direction) * FLAT_ID_INT
+    direction = np.full(data.shape, FLAT_ID_INT, 'float64')
+    mag = np.full(data.shape, FLAT_ID_INT, 'float64')
 
     slc0 = [slice(1, -1), slice(1, -1)]
     for ind in xrange(8):
@@ -2596,3 +2606,9 @@ def _calc_direction(data, mag, direction, ang, d1, d2, theta,
         direction[slc0][I4] = r[I4] * ang[1] + ang[0] * np.pi/2
 
     return mag, direction
+
+def _get_dX_mean(dX, i1, i2):
+    if i1 == i2:
+        return dX[min(i1, dX.size-1)]
+    else:
+        return dX[make_slice(i1, i2)].mean()
