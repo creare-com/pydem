@@ -549,6 +549,7 @@ class DEMProcessor(object):
             If isinstance(tuple): (elev, lat, lon), three numpy arrays containing
                 elevation data, the latitude (rows), and longitude (columns) of the array.
                 Note: only the max and min values of the latitude and longitude inputs are used.
+                       and a square N-S E-W aligned array is assumed.
         dx_dy_from_file : bool, optional
             Default True. If true, will extract coordinates from geotiff file
             and use those to calculate the magnitude/direction of slopes.
