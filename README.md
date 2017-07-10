@@ -99,11 +99,11 @@ The following options are used by the DEMProcess object. They can be modified by
  * `resolve_edges`: Ensure edge UCA is continuous across chunks. Default `True`.
  * `chunk_size_uca`: Chunk size for uca calculation. Default `512`.
  * `chunk_overlap_uca`: Overlap to use for resolving uca at chunk edges. Default `32`.
- * `drain_pits`:
- * `drain_flats`:
- * `drain_pits_max_iter`:
- * `drain_pits_max_dist`:
- * `drain_pits_max_dist_XY`:
+ * `drain_pits`: Drain from "pits" to nearby but non-adjacent pixels. Pits have no lower adjacent pixels to drain to directly. *Note that with `fill_flats_pits` off, this setting will still drain each pixel in large flat regions, but it may be slower and produces less reasonable results.* Default `True`.
+ * `drain_pits_max_iter`: Maximum number of iterations to look for drain pixels for pits. Generally, "nearby drains" for a pit/flat region are found by expanding the region upward/outward iteratively. Default `100`.
+ * `drain_pits_max_dist`: Maximum distance in coordnate-space to (non-adjacent) drains for pits. Pits that are too far from another pixel with a lower elevation will not drain. Default `20`.
+ * `drain_pits_max_dist_XY`: Maximum distance in real-space to (non-adjacent) drains for pits. Pits that are too far from another pixel with a lower elevation will not drain. This filter is applied after `drain_pits_max_dist`; if the X and Y resolution are similar, this filter is generally unnecessary. Default `None`.
+ * `drain_flats`: *[Deprecated, replaced by `drain_pits`]* Drains flat regions and pits by draining all pixels in the region to an arbitrary pixel in the region and then draining that pixel to the border of the flat region. Ignored if `drain_pits` is `True`. Default `False`.
  * `apply_uca_limit_edges`: Mark edges as completed if the maximum UCA is reached when resolving drainage across edges. Default `False`.
  * `uca_saturaion_limit`: Default `32`.
  
