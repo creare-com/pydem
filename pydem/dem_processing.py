@@ -48,6 +48,10 @@ The Edge and TileEdge classes keep track of the edge information for tiles
 
 Development Notes
 ------------------
+TODO: Replace complete file loading with partial loading from disk to RAM.
+      Presently, an entire geotiff is loaded into memory, which makes the
+      chunk calculation less useful because the memory restriction is still
+      present
 TODO: Improve general memory usage (following from previous TODO).
 TODO: Cythonize magnitude and slope calculations
 
