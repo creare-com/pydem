@@ -855,7 +855,7 @@ class DEMProcessor(object):
                 pass
             elif n > 0:
                 # special fill case
-                out[region] += min(0.5, (roi[source].min() - e) / 2)
+                out[region] += min(0.99, (roi[source].min() - e))
             elif self.fill_flats_peaks:
                 # small peak
                 out[region] += 0.5
@@ -881,7 +881,7 @@ class DEMProcessor(object):
         if source.any():
             # Normal case: interpolate from shallow sources (non-cliffs)
             e_source = roi[source].min()
-            eH = min(e + 0.5, (e+e_source)/2.0)
+            eH = min(e + 0.99, e_source)
             source &= (roi <= e_source + self.fill_flats_source_tol)
         elif self.fill_flats_peaks:
             # Mountain peaks: drain from a center point in the peak
