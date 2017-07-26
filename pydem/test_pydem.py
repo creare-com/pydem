@@ -207,7 +207,7 @@ def case_ring_flat(x, y, drains):
     raster2 = raster.copy()
     for drain in drains:
         raster[drain[0], drain[1]] -= np.min(raster[drain[0], drain[1]])
-    raster[I] = 0.65
+    raster[I] = 0.51
     raster[I1] = raster2[I1]
     return raster, angle
 

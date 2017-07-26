@@ -1,48 +1,44 @@
 # -*- coding: utf-8 -*-
 """
-   Copyright 2015 Creare
+Created on Tue Nov 04 17:11:16 2014
 
-   Licensed under the Apache License, Version 2.0 (the "License");
-   you may not use this file except in compliance with the License.
-   You may obtain a copy of the License at
-
-       http://www.apache.org/licenses/LICENSE-2.0
-
-   Unless required by applicable law or agreed to in writing, software
-   distributed under the License is distributed on an "AS IS" BASIS,
-   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-   See the License for the specific language governing permissions and
-   limitations under the License.
+@author: mpu
 """
+
 import numpy as np
 cimport numpy as np
 
+ctypedef np.uint8_t DTYPEb_t
+ctypedef np.int64_t DTYPEi_t
+ctypedef np.int32_t DTYPEi32_t
+
+dtype_bool = 'uint8'
 
 #==============================================================================
 # Drain a single array's connections: If connected to start, change value
 #==============================================================================
 
-def drain_connections(np.ndarray[int, ndim=1, cast=True] arr,
-                      np.ndarray[int, ndim=1, cast=True] ids,
-                       np.ndarray[int, ndim=1] indptr,
-                      np.ndarray[int, ndim=1] indices, int set_to=0):
-    cdef int n_ids = ids.size
-    cdef int n_A = indices.size
+def drain_connections(np.ndarray[DTYPEb_t, ndim=1, cast=True] arr,
+                      np.ndarray[DTYPEb_t, ndim=1, cast=True] ids,
+                      np.ndarray[DTYPEi32_t, ndim=1] indptr,
+                      np.ndarray[DTYPEi32_t, ndim=1] indices, DTYPEb_t set_to=0):
+    cdef DTYPEi_t n_ids = ids.size
+    cdef DTYPEi_t n_A = indices.size
 
-    cdef np.ndarray[int, ndim=1] ids_old = np.zeros(n_ids, dtype=int)
+    cdef np.ndarray[DTYPEb_t, ndim=1] ids_old = np.zeros(n_ids, dtype=dtype_bool)
 
     _drain_connections(&(arr[0]), &(ids[0]), &(ids_old[0]),
                        &(indptr[0]), &(indices[0]), n_ids, n_A, set_to)
     return arr
 
 
-cdef void _drain_connections(int *arr,
-                             int *ids, int *ids_old, int *indptr, int *indices,
-                             int n_ids, int n_A, int tf):
-    cdef int i = 0
-    cdef int j = 0
-    cdef int keep_going = 1
-    cdef int *tmp
+cdef void _drain_connections(DTYPEb_t *arr,
+                             DTYPEb_t *ids, DTYPEb_t *ids_old, DTYPEi32_t *indptr, DTYPEi32_t *indices,
+                             DTYPEi_t n_ids, DTYPEi_t n_A, DTYPEb_t tf):
+    cdef DTYPEi_t i = 0
+    cdef DTYPEi_t j = 0
+    cdef DTYPEb_t keep_going = 1
+    cdef DTYPEb_t *tmp
     while keep_going: #If I use ids.sum() > 0 then I might get stuck in circular references.
 #        print "c",
         # switch pointers
@@ -66,37 +62,35 @@ cdef void _drain_connections(int *arr,
 # Update area using the correct weighting factors and not double-dipping
 #==============================================================================
 def drain_area(np.ndarray[double, ndim=1] area,
-               np.ndarray[int, ndim=1, cast=True] done,
-               np.ndarray[int, ndim=1, cast=True] ids,
-               np.ndarray[int, ndim=1] col_indptr,
-               np.ndarray[int, ndim=1] col_indices,
+               np.ndarray[DTYPEb_t, ndim=1, cast=True] done,
+               np.ndarray[DTYPEb_t, ndim=1, cast=True] ids,
+               np.ndarray[DTYPEi32_t, ndim=1, cast=True] col_indptr,
+               np.ndarray[DTYPEi32_t, ndim=1, cast=True] col_indices,
                np.ndarray[double, ndim=1] col_data,
-               np.ndarray[int, ndim=1] row_indptr,
-               np.ndarray[int, ndim=1] row_indices,
-               int n_rows, int n_cols,
+               np.ndarray[DTYPEi32_t, ndim=1, cast=True] row_indptr,
+               np.ndarray[DTYPEi32_t, ndim=1, cast=True] row_indices,
+               DTYPEi_t n_rows, DTYPEi_t n_cols,
                np.ndarray[double, ndim=1, cast=True] edge_todo=None,
                np.ndarray[double, ndim=1, cast=True] edge_todo_no_mask=None,
                skip_edge=0):
-    cdef int n_ids = ids.size
-    cdef int n_A = col_indices.size
+    cdef DTYPEi_t n_ids = ids.size
+    cdef DTYPEi_t n_A = col_indices.size
 
-    cdef int do_edge_todo
-    cdef np.ndarray[double, ndim=1] edge_todo2 = np.zeros(1, dtype=float)
+    cdef DTYPEb_t do_edge_todo
     if edge_todo is None:
-        edge_todo = edge_todo2
+        edge_todo = np.zeros(1, dtype=float)
         do_edge_todo = 0
     else:
         do_edge_todo = 1
 
-    cdef int do_edge_todo_no_mask
-    cdef np.ndarray[double, ndim=1] edge_todo_no_mask2 = np.zeros(1, dtype=float)
+    cdef DTYPEb_t do_edge_todo_no_mask
     if edge_todo_no_mask is None:
-        edge_todo_no_mask = edge_todo_no_mask2
+        edge_todo_no_mask = np.zeros(1, dtype=float)
         do_edge_todo_no_mask = 0
     else:
         do_edge_todo_no_mask = 1
 
-    cdef np.ndarray[int, ndim=1] ids_old = np.zeros(n_ids, dtype=int)
+    cdef np.ndarray[DTYPEb_t, ndim=1] ids_old = np.zeros(n_ids, dtype=dtype_bool)
 
     _drain_area(&(area[0]), &(done[0]), &(ids[0]), &(ids_old[0]),
                        &(col_indptr[0]), &(col_indices[0]), &(col_data[0]),
@@ -105,30 +99,30 @@ def drain_area(np.ndarray[double, ndim=1] area,
                        &(edge_todo[0]), do_edge_todo,
                        &(edge_todo_no_mask[0]), do_edge_todo_no_mask,
                        skip_edge)
-    return area, done, edge_todo, edge_todo_no_mask
+    return area, done, edge_todo.astype('bool'), edge_todo_no_mask.astype('bool')
 
 
-cdef void _drain_area(double *area, int* done,
-                             int *ids, int *ids_old,
-                             int *col_indptr, int *col_indices, double *col_data,
-                             int *row_indptr, int *row_indices,
-                             int n_rows, int n_cols, int n_ids, int n_A,
-                             double* edge_todo, int do_edge_todo,
-                             double* edge_todo_no_mask, int do_edge_todo_no_mask,
-                             int skip_edge):
-    cdef int i = 0
-    cdef int j = 0
-    cdef int keep_going = 1
-    cdef int *tmp
+cdef void _drain_area(double *area, DTYPEb_t* done,
+                             DTYPEb_t *ids, DTYPEb_t *ids_old,
+                             DTYPEi32_t *col_indptr, DTYPEi32_t *col_indices, double *col_data,
+                             DTYPEi32_t *row_indptr, DTYPEi32_t *row_indices,
+                             DTYPEi_t n_rows, DTYPEi_t n_cols, DTYPEi_t n_ids, DTYPEi_t n_A,
+                             double* edge_todo, DTYPEb_t do_edge_todo,
+                             double* edge_todo_no_mask, DTYPEb_t do_edge_todo_no_mask,
+                             DTYPEi_t skip_edge):
+    cdef DTYPEi_t i = 0
+    cdef DTYPEi_t j = 0
+    cdef DTYPEb_t keep_going = 1
+    cdef DTYPEb_t *tmp
     cdef double factor = 0
-    cdef int wait_for_neighbors = 0
+    cdef DTYPEb_t wait_for_neighbors = 0
     while keep_going: # If I use ids.sum() > 0 then I might get stuck in circular references.
 #        print "oc",
         # Set the points that are about to be drained as done
         # This has to be done before the next loop because the next candidates
         # check to make sure that all the points that drain into them are done
         for i in xrange(n_ids):
-            if ids[i] > 0:
+            if ids[i]:
                 done[i] = 1
 #                print i, done[i]
 
@@ -141,7 +135,7 @@ cdef void _drain_area(double *area, int* done,
         _zero_arr(ids, n_ids)
 
         for i in xrange(n_ids):
-            if ids_old[i] == 0:
+            if not ids_old[i]:
                 continue # If this id is not active, just skip the next part
             for j in xrange(col_indptr[i], col_indptr[i + 1]):
                 row_id = col_indices[j]
@@ -153,6 +147,7 @@ cdef void _drain_area(double *area, int* done,
                     continue
 
                 area[row_id] += area[i] * factor
+                
                 if do_edge_todo:
                     edge_todo[row_id] += edge_todo[i] * factor
                 if do_edge_todo_no_mask:
@@ -181,21 +176,21 @@ cdef void _drain_area(double *area, int* done,
 # Helper functions
 #==============================================================================
 
-cdef int _check_id_changed(int *ids, int *ids_old, int n_ids):
-    cdef int i
-    cdef int ret = 0
+cdef DTYPEb_t _check_id_changed(DTYPEb_t *ids, DTYPEb_t *ids_old, DTYPEi_t n_ids):
+    cdef DTYPEi_t i
+    cdef DTYPEb_t ret = 0
     for i in xrange(n_ids):
         if ids[i] != ids_old[i]:
             ret = 1
-            return ret
+            break
     return ret
 
-cdef _zero_arr(int *arr, int n):
-    cdef int i
+cdef _zero_arr(DTYPEb_t *arr, DTYPEi_t n):
+    cdef DTYPEi_t i
     for i in xrange(n):
         arr[i] = 0
 
-cdef int _check_id_on_edge(int row_id, int n_rows, int n_cols):
+cdef DTYPEi_t _check_id_on_edge(DTYPEi_t row_id, DTYPEi_t n_rows, DTYPEi_t n_cols):
     # Everything should have been done using c-order.
     # So, if the id is on the top edge, it will have a value less than n_cols
     if row_id < n_cols:
@@ -215,4 +210,3 @@ cdef int _check_id_on_edge(int row_id, int n_rows, int n_cols):
         return 1
     else: # Otherwise, it's not on an edge
         return 0
-
