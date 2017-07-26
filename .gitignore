@@ -1,0 +1,6 @@
+build/
+*.pyc
+pyDEM.egg-info/
+pydem/cyfuncs/cyutils.cpp
+*.pyd
+pydem/reader/inpaint.cpp
