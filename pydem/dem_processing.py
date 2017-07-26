@@ -48,23 +48,12 @@ The Edge and TileEdge classes keep track of the edge information for tiles
 
 Development Notes
 ------------------
-TODO: Implement this for the elevation data http://pastebin.com/umNmSrE2 .
-    Generally the DEM data is stored as integers. So in areas with flat terrain
-    due to rounding there may be large flats. We can create interpolated
-    floating point values in those regions so that we can still get good
-    answers
-
 TODO: Replace complete file loading with partial loading from disk to RAM.
-    Presently, an entire geotiff is loaded into memory, which makes the
-    chunk calculation less useful because the memory restriction is still
-    present
-
+      Presently, an entire geotiff is loaded into memory, which makes the
+      chunk calculation less useful because the memory restriction is still
+      present
 TODO: Improve general memory usage (following from previous TODO).
-
 TODO: Cythonize magnitude and slope calculations
-
-TODO: Implement pit-removal algorithm so that we can start from raw elevation
-    tiles.
 
 Created on Wed Jun 18 14:19:04 2014
 
@@ -80,12 +69,14 @@ import os
 import subprocess
 import scipy.sparse as sps
 import scipy.ndimage as spndi
-import numba
 
-from reader.gdal_reader import GdalReader
+from reader.gdal_reader import GdalReader, InputRasterDataLayer
+from reader.my_types import grid_coords_from_corners, Point
 from taudem import taudem
 from test_pydem import get_test_data, make_file_names
-from utils import mk_dx_dy_from_geotif_layer, get_fn
+from utils import (mk_dx_dy_from_geotif_layer, get_fn,
+                   make_slice, is_edge, grow_obj, find_centroid, get_distance,
+                   get_border_index, get_border_mask, get_adjacent_index)
 
 try:
     from cyfuncs import cyutils
@@ -103,11 +94,11 @@ FLAT_ID = np.nan  # This is the fill value for flats in float arrays
 FLAT_ID_INT = -1  # This is the fill value for flats in int arrays
 
 # Used to extend flat region downstream when calculating angle
-FLATS_KERNEL1 = np.ones((3, 3))
-FLATS_KERNEL2 = np.ones((3, 3))  # Convolution used to find edges to the flats
+FLATS_KERNEL1 = np.ones((3, 3), bool)
+FLATS_KERNEL2 = np.ones((3, 3), bool)  # Convolution used to find edges to the flats
 # This is the only choice for FLATS_KERNEL3 because otherwise it won't play
 # nicely with the pit-filling algorithm
-FLATS_KERNEL3 = np.ones((3, 3))  # Kernel used to connect flats and edges
+FLATS_KERNEL3 = np.ones((3, 3), bool)  # Kernel used to connect flats and edges
 FILL_VALUE = -9999  # This is the integer fill value for no-data values
 
 
@@ -125,7 +116,7 @@ class Edge(object):
         self.todo = np.ones(size, bool)
         self.done = np.zeros(size, bool)
         self.slice = slice_
-        self.data = np.zeros(size, float)
+        self.data = np.zeros(size, 'float64')
 
     @property
     def n_done(self):
@@ -202,10 +193,10 @@ class TileEdge(object):
         right = np.empty((left_edge.size, top_edge.size), Edge)
         top = np.empty((left_edge.size, top_edge.size), Edge)
         bottom = np.empty((left_edge.size, top_edge.size), Edge)
-        n_done = np.zeros(left.shape, int)
-        self.percent_done = np.zeros(left.shape, float)
-        self.n_todo = np.zeros(left.shape, int)
-        max_elev = np.zeros(left.shape, float)
+        n_done = np.zeros(left.shape, 'int64')
+        self.percent_done = np.zeros(left.shape, 'float64')
+        self.n_todo = np.zeros(left.shape, 'int64')
+        max_elev = np.zeros(left.shape, 'float64')
         for tb in xrange(top_edge.size):
             for lr in xrange(left_edge.size):
                 te = top_edge[tb]
@@ -464,6 +455,18 @@ class DEMProcessor(object):
 #    apply_twi_limits = True
 #    apply_twi_limits_on_uca = True
 
+    fill_flats = True
+    fill_flats_below_sea = False
+    fill_flats_source_tol = 1
+    fill_flats_peaks = True
+    fill_flats_pits = True
+    
+    drain_pits = True
+    drain_flats = False # will be ignored if drain_pits is True
+    drain_pits_max_iter = 100
+    drain_pits_max_dist = 20 # coordinate space
+    drain_pits_max_dist_XY = None # real space
+
     # When resolving drainage across edges, if maximum UCA is reached, should
     # edge be marked as completed?
     apply_uca_limit_edges = False
@@ -540,21 +543,28 @@ class DEMProcessor(object):
         """
         Parameters
         -----------
-        file_name : str
-            File name of elevation data
+        file_name : str, np.ndarray, tuple
+            If isinstance(str): filename of of elevation data
+            If isinstance(np.ndarray): a numpy array containing elevation data
+            If isinstance(tuple): (elev, lat, lon), three numpy arrays containing
+                elevation data, the latitude (rows), and longitude (columns) of the array.
+                Note: only the max and min values of the latitude and longitude inputs are used.
+                       and a square N-S E-W aligned array is assumed.
         dx_dy_from_file : bool, optional
             Default True. If true, will extract coordinates from geotiff file
             and use those to calculate the magnitude/direction of slopes.
-            Otherwise assumes rectangular (uniform) coordinates.
+            Otherwise assumes rectangular (uniform) coordinates. This flag is not
+            used if file_name is not a string.
         plotflag : bool, optional
             Default False: If True, will plot debug image. For a large
             file this is not advised.
         """
         # %%
-        if os.path.exists(file_name):
+        if isinstance(file_name, str) and os.path.exists(file_name):
             elev_file = GdalReader(file_name=file_name)
             elev, = elev_file.raster_layers
             data = elev.raster_data
+
             self.elev = elev
             self.data = data
             try:  # if masked array
@@ -567,13 +577,32 @@ class DEMProcessor(object):
                                                | (self.data < -9998))
             del elev_file  # close the file
             self.file_name = file_name
+        elif isinstance(file_name, np.ndarray): #elevation data given directly
+            self.data = file_name
+            dX = np.ones(self.data.shape[0] - 1) / self.data.shape[1]  #dX only changes in latitude
+            dY = np.ones(self.data.shape[0] - 1) / self.data.shape[0]
+            # Need to spoof elev
+            elev = InputRasterDataLayer()
+            ulc = Point(lat=1, lon=0)
+            lrc = Point(lat=0, lon=1)
+            elev.grid_coordinates = grid_coords_from_corners(ulc, lrc, self.data.shape)
+            self.elev = elev
+        elif isinstance(file_name, tuple): #elevation data given directly
+            self.data, lat, lon = file_name
+            # Need to spoof elev
+            elev = InputRasterDataLayer()
+            ulc = Point(lat=np.nanmax(lat), lon=np.nanmin(lon))
+            lrc = Point(lat=np.nanmin(lat), lon=np.nanmax(lon))
+            elev.grid_coordinates = grid_coords_from_corners(ulc, lrc, self.data.shape)
+            dX, dY = mk_dx_dy_from_geotif_layer(elev)
+            self.elev = elev
 
         shp = np.array(self.data.shape) - 1
-        if dx_dy_from_file == 'test':  # This is a hidden option for dev/test
+        if isinstance(file_name, str) and dx_dy_from_file == 'test':  # This is a hidden option for dev/test
             # dX = np.linspace(0.9, 1.1, data.shape[0] - 1)
             dY = np.linspace(0.9, 0.9, data.shape[0] - 1)
-            dX = np.ones((data.shape[0] - 1)) / TEST_DIV
-        elif dx_dy_from_file:
+            dX = np.ones((data.shape[0] - 1), 'float64') / TEST_DIV
+        elif isinstance(file_name, str) and dx_dy_from_file:
             dX, dY = mk_dx_dy_from_geotif_layer(elev)
 
             if plotflag:
@@ -582,9 +611,9 @@ class DEMProcessor(object):
                 y = np.dot(np.arange(1, 10)[:, None], dY[None, :])
                 plot(x.ravel(), y.ravel(), '.')
                 gca().invert_yaxis()
-        else:
-            dX = np.ones((data.shape[0]-1)) / (shp[1])
-            dY = np.ones((data.shape[0]-1)) / (shp[0])
+        elif isinstance(file_name, str):
+            dX = np.ones((data.shape[0]-1), 'float64') / (shp[1])
+            dY = np.ones((data.shape[0]-1), 'float64') / (shp[0])
         if dx_dy_from_file == 'hack':
             dx = np.mean([dX.mean(), dY.mean()])
             dX[:] = dx
@@ -778,43 +807,161 @@ class DEMProcessor(object):
             Default False. If true, the data in arr2 will be added to arr1,
             otherwise data in arr2 will overwrite data in arr1
         """
+        
         if te == 0:
             i1 = 0
         else:
             i1 = ovr
+        
         if be == data.shape[0]:
             i2 = 0
             i2b = None
         else:
             i2 = -ovr
             i2b = -ovr
+        
         if le == 0:
             j1 = 0
         else:
             j1 = ovr
+        
         if re == data.shape[1]:
             j2 = 0
             j2b = None
         else:
             j2 = -ovr
             j2b = -ovr
+
         if add:
             arr1[te+i1:be+i2, le+j1:re+j2] += arr2[i1:i2b, j1:j2b]
         else:
             arr1[te+i1:be+i2, le+j1:re+j2] = arr2[i1:i2b, j1:j2b]
 
     def find_flats(self):
-        flats = self._find_flats_edges(self.data, self.dX, self.dY,
-                                       self.mag, self.direction)
-        self.direction[flats] = FLAT_ID
-        self.mag[flats] = FLAT_ID
+        flats = self._find_flats_edges(self.data, self.mag, self.direction)
+        self.direction[flats] = FLAT_ID_INT
+        self.mag[flats] = FLAT_ID_INT
         self.flats = flats
+
+    def _fill_flat(self, roi, out, region, edge, it=0, debug=False):
+        e = roi[region][0]
+
+        # 1-pixel special cases (3x3, 3x2, 2x3, and 2x2)
+        if roi.size <= 9 and region.sum() == 1:
+            source = roi > e
+            n = source.sum()
+            if n == roi.size-1:
+                # pit
+                pass
+            elif n > 0:
+                # special fill case
+                out[region] += min(1.0, (roi[source].min() - e)) - 0.01
+            elif self.fill_flats_peaks:
+                # small peak
+                out[region] += 0.5
+
+            return
+
+        # get source and drain masks
+        border = get_border_mask(region)
+        drain = border & (roi == e)
+        source = border & (roi > e)
+
+        replace = None
+        
+        # update source and set eH (high elevation for interpolation)
+        
+        # if (it == 0 and drain.any() and (region & edge).any() and (region & edge & get_border_mask(source) & ~get_border_mask(drain)).any()):
+        #     # Downstream side of river beds that cross an edge: drain from edge
+        #     replace = region & edge & get_border_mask(source) & ~get_border_mask(drain)
+        #     eH = min(e + 0.5, (e+roi[source].min())/2.0)
+        #     out[replace] = eH
+        #     source = replace
+        # elif source.any():
+        if source.any():
+            # Normal case: interpolate from shallow sources (non-cliffs)
+            e_source = roi[source].min()
+            eH = min(e + 1.0, e_source)
+            source &= (roi <= e_source + self.fill_flats_source_tol)
+        elif self.fill_flats_peaks:
+            # Mountain peaks: drain from a center point in the peak
+            eH = e + 0.5
+            centroid = find_centroid(region)
+            out[centroid] = eH
+            source[centroid] = True
+            replace = source
+        else:
+            return
+
+        # update drain
+        if drain.any():
+            # Normal case
+            pass
+        elif (region & edge).any():
+            # Upstream side of river beds that cross an edge: drain to edge
+            replace = drain = region & edge
+            if not (region & ~drain).any():
+                return
+        elif self.fill_flats_pits:
+            # Pit area
+            centroid = find_centroid(region)
+            drain[centroid] = True
+            replace = drain
+        else:
+            return
+
+        # interpolate flat area
+        dH = get_distance(region, source)
+        dL = get_distance(region, drain)
+        if replace is None: interp = region
+        else: interp = region & ~replace
+        out[interp] = (eH*dL[interp]**2 + e*dH[interp]**2) / (dL[interp]**2 + dH[interp]**2)
+
+        # iterate to fill remaining flat areas (created during interpolation)
+        flat = (spndi.minimum_filter(out, (3, 3)) >= out) & region
+        if flat.any():
+            out2 = out.copy()
+            flats, n = spndi.label(flat, structure=FLATS_KERNEL3)
+            for i, _obj in enumerate(spndi.find_objects(flats)):
+                obj = grow_obj(_obj, roi.shape)
+                self._fill_flat(out[obj], out2[obj], flats[obj]==i+1, edge[obj])
+            out = out2
+
+        # if debug:
+        #     from matplotlib import pyplot
+        #     from utils import plot_flat
+        #     plot_flat(roi, out, region, source, drain, dL, dH)
+        #     pyplot.show()
 
     def calc_slopes_directions(self, plotflag=False):
         """
         Calculates the magnitude and direction of slopes and fills
         self.mag, self.direction
         """
+        
+        # TODO minimum filter behavior with nans?
+        
+        # fill/interpolate flats first
+        if self.fill_flats:
+            data = np.ma.filled(self.data.astype('float64'), np.nan)
+            filled = data.copy()
+            
+            edge = np.ones_like(data, bool)
+            edge[1:-1, 1:-1] = False
+
+            if self.fill_flats_below_sea: sea_mask = data != 0
+            else: sea_mask = data > 0
+            flat = (spndi.minimum_filter(data, (3, 3)) >= data) & sea_mask
+
+            flats, n = spndi.label(flat, structure=FLATS_KERNEL3)
+            objs = spndi.find_objects(flats)
+
+            for i, _obj in enumerate(objs):
+                obj = grow_obj(_obj, data.shape)
+                self._fill_flat(data[obj], filled[obj], flats[obj]==i+1, edge[obj])
+
+            self.data = np.ma.masked_array(filled, mask=np.isnan(filled)).astype(self.data.dtype)
+
         # %% Calculate the slopes and directions based on the 8 sections from
         # Tarboton http://www.neng.usu.edu/cee/faculty/dtarb/96wr03137.pdf
         if self.data.shape[0] <= self.chunk_size_slp_dir and \
@@ -829,8 +976,8 @@ class DEMProcessor(object):
 
             self.find_flats()
         else:
-            self.direction = np.ones(self.data.shape) * FLAT_ID_INT
-            self.mag = np.ones_like(self.direction) * FLAT_ID_INT
+            self.direction = np.full(self.data.shape, FLAT_ID_INT, 'float64')
+            self.mag = np.full(self.data.shape, FLAT_ID_INT, 'float64')
             self.flats = np.zeros(self.data.shape, bool)
             top_edge, bottom_edge = \
                 self._get_chunk_edges(self.data.shape[0],
@@ -853,11 +1000,10 @@ class DEMProcessor(object):
                                                 self.dY[te:be-1])
 
                     flats = self._find_flats_edges(self.data[te:be, le:re],
-                                                   self.dX[te:be-1],
-                                                   self.dY[te:be-1], mag,
-                                                   direction)
-                    direction[flats] = FLAT_ID
-                    mag[flats] = FLAT_ID
+                                                   mag, direction)
+
+                    direction[flats] = FLAT_ID_INT
+                    mag[flats] = FLAT_ID_INT
                     self._assign_chunk(self.data, self.mag, mag,
                                        te, be, le, re, ovr)
                     self._assign_chunk(self.data, self.direction, direction,
@@ -895,8 +1041,8 @@ class DEMProcessor(object):
         """
         shp = np.array(data.shape) - 1
 
-        direction = np.ones(data.shape) * FLAT_ID_INT
-        mag = np.ones_like(direction) * FLAT_ID_INT
+        direction = np.full(data.shape, FLAT_ID_INT, 'float64')
+        mag = np.full(direction, FLAT_ID_INT, 'float64')
 
         ind = 0
         d1, d2, theta = _get_d1_d2(dX, dY, ind, [0, 1], [1, 1], shp)
@@ -907,7 +1053,7 @@ class DEMProcessor(object):
 
         return mag, direction
 
-    def _find_flats_edges(self, data, dX, dY, mag, direction):
+    def _find_flats_edges(self, data, mag, direction):
         """
         Extend flats 1 square downstream
         Flats on the downstream side of the flat might find a valid angle,
@@ -915,32 +1061,22 @@ class DEMProcessor(object):
         these and then set them equal to a flat
         """
 
-        flats = mag == FLAT_ID_INT
-        assigned, n_flats = spndi.label(flats, FLATS_KERNEL3)
-        # Perhaps the code below will be faster?
-#        edges = ndimage.convolve(flats, FLATS_KERNEL1) - flats
-#        edges = ndimage.convolve(edges, FLATS_KERNEL1) & flats
-#        assigned, n_flats = spndi.label(edges, FLATS_KERNEL3)
-        nn, mm = flats.shape
-        flat_ids, flat_coords, flat_labelsf = _get_flat_ids(assigned)
-        for ii in xrange(n_flats):
-            ids_flats = flat_ids[flat_coords[ii]:flat_coords[ii+1]]
-            elev_flat = data.ravel()[flat_ids[flat_coords[ii]]]
-            if elev_flat is np.ma.masked:
-                continue
-            j = ids_flats % mm
-            i = ids_flats // mm
-            for iii in [-1, 0, 1]:
-                for jjj in [-1, 0, 1]:
-                    i_2 = i + iii
-                    j_2 = j + jjj
+        i12 = np.arange(data.size).reshape(data.shape)
 
-                    ids_tmp = (i_2 >= 0) & (j_2 >= 0) & (i_2 < nn) & (j_2 < mm)
-                    ids_tmp2 = data[i_2[ids_tmp], j_2[ids_tmp]] == elev_flat
-                    flats[i_2[ids_tmp][ids_tmp2], j_2[ids_tmp][ids_tmp2]]\
-                        += FLATS_KERNEL3[iii+1, jjj+1]
+        flat = mag == FLAT_ID_INT
+        flats, n = spndi.label(flat, structure=FLATS_KERNEL3)
+        objs = spndi.find_objects(flats)
 
-        return flats
+        f = flat.ravel()
+        d = data.ravel()
+        for i, _obj in enumerate(objs):
+            region = flats[_obj] == i+1
+            I = i12[_obj][region]
+            J = get_adjacent_index(I, data.shape, data.size)
+            f[J] = d[J] == d[I[0]]
+
+        flat = f.reshape(data.shape)
+        return flat
 
     def calc_uca(self, plotflag=False, edge_init_data=None, uca_init=None):
         """Calculates the upstream contributing area.
@@ -980,9 +1116,9 @@ class DEMProcessor(object):
             self.calc_slopes_directions()
 
         # Initialize the upstream area
-        uca_edge_init = np.zeros(self.data.shape)
-        uca_edge_done = np.zeros(self.data.shape, dtype=bool)
-        uca_edge_todo = np.zeros(self.data.shape, dtype=bool)
+        uca_edge_init = np.zeros(self.data.shape, 'float64')
+        uca_edge_done = np.zeros(self.data.shape, bool)
+        uca_edge_todo = np.zeros(self.data.shape, bool)
         edge_init_done, edge_init_todo = None, None
         if edge_init_data is not None:
             edge_init_data, edge_init_done, edge_init_todo = edge_init_data
@@ -1001,9 +1137,9 @@ class DEMProcessor(object):
                     edge_init_todo[key].reshape(uca_edge_init[val].shape)
 
         if uca_init is None:
-            self.uca = np.ones(self.data.shape) * FLAT_ID_INT
+            self.uca = np.full(self.data.shape, FLAT_ID_INT, 'float64')
         else:
-            self.uca = uca_init
+            self.uca = uca_init.astype('float64')
 
         if self.data.shape[0] <= self.chunk_size_uca and \
                 self.data.shape[1] <= self.chunk_size_uca:
@@ -1032,7 +1168,6 @@ class DEMProcessor(object):
                 self.edge_done = edone
 
         else:
-
             top_edge, bottom_edge = \
                 self._get_chunk_edges(self.data.shape[0], self.chunk_size_uca,
                                       self.chunk_overlap_uca)
@@ -1167,7 +1302,10 @@ class DEMProcessor(object):
                 tile_edge.set_all_neighbors_data(self.uca,
                                                  edge_done, (te, be, le, re))
 
-                edge_not_done_tile[te:be, le:re] += e2doi_tile
+                try:
+                    edge_not_done_tile[te:be, le:re] += e2doi_tile
+                except:
+                    import ipdb; ipdb.set_trace() # BREAKPOINT
                 tile_edge.set_sides((te, be, le, re), e2doi, 'todo',
                                     local=True)
                 i_old = i
@@ -1293,15 +1431,15 @@ class DEMProcessor(object):
             data, dX, dY, direction, flats)
 
         # Build the drainage or adjacency matrix
-        A = self._mk_adjacency_matrix(section, proportion, flats, data, mag)
+        A = self._mk_adjacency_matrix(section, proportion, flats, data, mag, dX, dY)
         if CYTHON:
             B = A
             C = A.tocsr()
-        if 1:  # not CYTHON:
+        if not CYTHON:
             A = A.tocoo()
 
         ids = np.zeros(data.shape, bool)
-        area = np.zeros(data.shape, float)
+        area = np.zeros(data.shape, 'float64')
         # Set the ids to the edges that are now done, and initialize the
         # edge area
         if tile_edge is not None:
@@ -1367,12 +1505,11 @@ class DEMProcessor(object):
                     arr.ravel()[rows_id] = False  # Set second arrival new id
 
             return arr
+
         if CYTHON:
-            a = cyutils.drain_connections(done.ravel().astype(int),
-                                          ids.astype(int), B.indptr, B.indices,
-                                          set_to=False)
-            a = a.reshape(done.shape)
-            done = a.astype(bool)
+            a = cyutils.drain_connections(
+                done.ravel(), ids, B.indptr, B.indices, set_to=False)
+            done = a.reshape(done.shape).astype(bool)
         else:
             done = drain_pixels_done(ids, done, A.row, A.col)
 
@@ -1440,18 +1577,18 @@ class DEMProcessor(object):
         if CYTHON:
             if edge_todo_tile is not None:
                 a, b, c, d = cyutils.drain_area(area.ravel(),
-                                                done.astype(int).ravel(),
-                                                ids.astype(int),
+                                                done.ravel(),
+                                                ids,
                                                 B.indptr, B.indices, B.data,
                                                 C.indptr, C.indices,
                                                 area.shape[0], area.shape[1],
-                                                edge_todo_tile.astype(float).ravel(),
+                                                edge_todo_tile.astype('float64').ravel(),
                                                 skip_edge=True)
                 edge_todo_tile = c.reshape(edge_todo_tile.shape)
             else:
                 a, b, c, d = cyutils.drain_area(area.ravel(),
-                                                done.astype(int).ravel(),
-                                                ids.astype(int),
+                                                done.ravel(),
+                                                ids,
                                                 B.indptr, B.indices, B.data,
                                                 C.indptr, C.indices,
                                                 area.shape[0], area.shape[1],
@@ -1490,12 +1627,12 @@ class DEMProcessor(object):
 #                #Follow the drainage along. New candidates are cells that just changed
 #                ids = (edge_todo_old.ravel() != arr.ravel())
             return arr
+        
         if CYTHON:
-            a = cyutils.drain_connections(edge_todo.ravel().astype(int),
-                                          ids.astype(int), B.indptr, B.indices,
+            a = cyutils.drain_connections(edge_todo.ravel(),
+                                          ids, B.indptr, B.indices,
                                           set_to=True)
-            a = a.reshape(edge_todo.shape)
-            edge_todo = (a.astype(bool))
+            edge_todo = a.reshape(edge_todo.shape).astype(bool)
         else:
             edge_todo = drain_pixels_todo(ids, edge_todo, A.row, A.col)
 
@@ -1517,7 +1654,7 @@ class DEMProcessor(object):
             data, dX, dY, direction, flats)
 
         # Build the drainage or adjacency matrix
-        A = self._mk_adjacency_matrix(section, proportion, flats, data, mag)
+        A = self._mk_adjacency_matrix(section, proportion, flats, data, mag, dX, dY)
         if CYTHON:
             B = A.tocsr()
 
@@ -1566,23 +1703,23 @@ class DEMProcessor(object):
         ids_old = np.zeros_like(ids)
         # %%
         count = 1
+        
+        if CYTHON:
+            area_ = area.ravel()
+            done_ = done.ravel()
+            edge_todo_ = edge_todo.astype('float64').ravel()
+            edge_todo_no_mask_ = edge_todo_no_mask.astype('float64').ravel()
+        data_ = data.ravel()
+
         while (np.any(~done) and count < self.circular_ref_maxcount):
             print ".",
             count += 1
             if CYTHON:
-                a, b, c, d = cyutils.drain_area(area.ravel(),
-                                                done.astype(int).ravel(),
-                                                ids.astype(int),
-                                                A.indptr, A.indices, A.data,
-                                                B.indptr, B.indices,
-                                                area.shape[0], area.shape[1],
-                                                edge_todo.astype(float).ravel(),
-                                                edge_todo_no_mask.astype(float).ravel())
-                area = a.reshape(area.shape)
-                done = b.reshape(done.shape).astype(bool)
-                edge_todo = c.reshape(edge_todo.shape).astype(bool)
-                edge_todo_no_mask = \
-                    d.reshape(edge_todo_no_mask.shape).astype(bool)
+                area_, done_, edge_todo_, edge_todo_no_mask_ = cyutils.drain_area(area_,
+                    done_, ids,
+                    A.indptr, A.indices, A.data, B.indptr, B.indices,
+                    area.shape[0], area.shape[1],
+                    edge_todo_, edge_todo_no_mask_)
             else:
                 # If I use ids.sum() > 0 then I might get stuck in
                 # circular references.
@@ -1594,10 +1731,17 @@ class DEMProcessor(object):
     #                figure(1);clf();imshow(area, interpolation='none');colorbar()
     #                figure(2);clf();imshow(ids.reshape(area.shape), interpolation='none');colorbar()
     #                figure(3);clf();imshow(done, interpolation='none');colorbar()
+                done_ = done.ravel()
             #%%
             ids[:] = False
-            max_elev = (data * (~done)).max()
-            ids[((data * (~done) - max_elev) / max_elev > -0.01).ravel()] = True
+            max_elev = (data_ * (~done_)).max()
+            ids[((data_ * (~done_) - max_elev) / max_elev > -0.01)] = True
+
+        if CYTHON:
+            area = area_.reshape(area.shape)
+            done = done_.reshape(done.shape)
+            edge_todo = edge_todo_.reshape(edge_todo.shape).astype(bool)
+            edge_todo_no_mask = edge_todo_no_mask_.reshape(edge_todo_no_mask.shape).astype(bool)
 
         area[flats] = np.nan
 
@@ -1611,8 +1755,9 @@ class DEMProcessor(object):
 
         # %%
         if plotflag:
-            self._plot_connectivity(A, (done.astype(float) is False)
-                                    + flats.astype(float) * 2, [0, 3])
+            # TODO DTYPE
+            self._plot_connectivity(A, (done.astype('float64') is False)
+                                    + flats.astype('float64') * 2, [0, 3])
         return area, edge_todo_i, edge_done, edge_todo_i_no_mask, edge_todo_no_mask
 
     def _drain_step(self, A, ids, area, done, edge_todo):
@@ -1661,10 +1806,10 @@ class DEMProcessor(object):
         if dX.size > 1:
             theta = np.row_stack((theta[0, :], theta, theta[-1, :]))
         # Which quadrant am I in?
-        section = ((direction / np.pi * 2.0) // 1).astype(int)
+        section = ((direction / np.pi * 2.0) // 1).astype('int8') # TODO DTYPE
         # Gets me in the quadrant
         quadrant = (direction - np.pi / 2.0 * section)
-        proportion = np.zeros_like(quadrant) * np.nan
+        proportion = np.full_like(quadrant, np.nan)
         # Now which section within the quadrant
         section = section * 2 \
             + (quadrant > theta.repeat(data.shape[1], 1)) * (section % 2 == 0) \
@@ -1698,7 +1843,7 @@ class DEMProcessor(object):
 
         return section, proportion
 
-    def _mk_adjacency_matrix(self, section, proportion, flats, elev, mag):
+    def _mk_adjacency_matrix(self, section, proportion, flats, elev, mag, dX, dY):
         """
         Calculates the adjacency of connectivity matrix. This matrix tells
         which pixels drain to which.
@@ -1714,21 +1859,30 @@ class DEMProcessor(object):
         j1 = - np.ones_like(i12)
         j2 = - np.ones_like(i12)
 
-        # make the connectivity for the non-flats
+        # make the connectivity for the non-flats/pits
         j1, j2 = self._mk_connectivity(section, i12, j1, j2)
-
-        # Now make the connectivity for the flats
-        j1, j2, mat_data, flat_i, flat_j, flat_prop = \
-            self._mk_connectivity_flats(i12, j1, j2, mat_data, flats,
-                                        elev, mag)
-
-        # %% Make the matrix and plot
         j = np.row_stack((j1, j2))
         i = np.row_stack((i12, i12))
+        
+        # connectivity for flats/pits
+        if self.drain_pits:
+            pit_i, pit_j, pit_prop, flats, mag = \
+                self._mk_connectivity_pits(i12, flats, elev, mag, dX, dY)
 
-        j = np.concatenate((j.ravel(), flat_j)).astype(int)
-        mat_data = np.concatenate((mat_data.ravel(), flat_prop))
-        i = np.concatenate((i.ravel(), flat_i)).astype(int)
+            j = np.concatenate([j.ravel(), pit_j]).astype('int64')
+            i = np.concatenate([i.ravel(), pit_i]).astype('int64')
+            mat_data = np.concatenate([mat_data.ravel(), pit_prop])
+
+        elif self.drain_flats:
+            j1, j2, mat_data, flat_i, flat_j, flat_prop = \
+                self._mk_connectivity_flats(
+                    i12, j1, j2, mat_data, flats, elev, mag)
+
+            j = np.concatenate([j.ravel(), flat_j]).astype('int64')
+            i = np.concatenate([i.ravel(), flat_j]).astype('int64')
+            mat_data = np.concatenate([mat_data.ravel(), flat_prop])
+
+
 
         # This prevents no-data values, remove connections when not present,
         # and makes sure that floating point precision errors do not
@@ -1852,6 +2006,97 @@ class DEMProcessor(object):
 
         return j1, j2
 
+    def _mk_connectivity_pits(self, i12, flats, elev, mag, dX, dY):
+        """
+        Helper function for _mk_adjacency_matrix. This is a more general
+        version of _mk_adjacency_flats which drains pits and flats to nearby
+        but non-adjacent pixels. The slope magnitude (and flats mask) is
+        updated for these pits and flats so that the TWI can be computed.
+        """
+        
+        e = elev.data.ravel()
+
+        pit_i = []
+        pit_j = []
+        pit_prop = []
+        warn_pits = []
+        
+        pits = i12[flats & (elev > 0)]
+        I = np.argsort(e[pits])
+        for pit in pits[I]:
+            # find drains
+            pit_area = np.array([pit], 'int64')
+
+            drain = None
+            epit = e[pit]
+            for it in range(self.drain_pits_max_iter):
+                border = get_border_index(pit_area, elev.shape, elev.size)
+
+                eborder = e[border]
+                emin = eborder.min()
+                if emin < epit:
+                    drain = border[eborder < epit]
+                    break
+
+                pit_area = np.concatenate([pit_area, border[eborder == emin]])
+
+            if drain is None:
+                warn_pits.append(pit)
+                continue
+            
+            ipit, jpit = np.unravel_index(pit, elev.shape)
+            Idrain, Jdrain = np.unravel_index(drain, elev.shape)
+
+            # filter by drain distance in coordinate space
+            if self.drain_pits_max_dist:
+                dij = np.sqrt((ipit - Idrain)**2 + (jpit-Jdrain)**2)
+                b = dij <= self.drain_pits_max_dist
+                if not b.any():
+                    warn_pits.append(pit)
+                    continue
+                drain = drain[b]
+                Idrain = Idrain[b]
+                Jdrain = Jdrain[b]
+            
+            # calculate real distances
+            dx = [_get_dX_mean(dX, ipit, idrain) * (jpit - jdrain)
+                  for idrain, jdrain in zip(Idrain, Jdrain)]
+            dy = [dY[make_slice(ipit, idrain)].sum() for idrain in Idrain]
+            dxy = np.sqrt(np.array(dx)**2 + np.array(dy)**2)
+
+            # filter by drain distance in real space
+            if self.drain_pits_max_dist_XY:
+                b = dxy <= self.drain_pits_max_dist_XY
+                if not b.any():
+                    warn_pits.append(pit)
+                    continue
+                drain = drain[b]
+                dxy = dxy[b]
+            
+            # calculate magnitudes
+            s = (e[pit]-e[drain]) / dxy
+
+            # connectivity info
+            # TODO proportion calculation (_mk_connectivity_flats used elev?)
+            pit_i += [pit for i in drain]
+            pit_j += drain.tolist()
+            pit_prop += s.tolist()
+            
+            # update pit magnitude and flats mask
+            mag[ipit, jpit] = np.mean(s)
+            flats[ipit, jpit] = False
+
+        if warn_pits:
+            warnings.warn("Warning %d pits had no place to drain to in this "
+                          "chunk" % len(warn_pits))
+        
+        # Note: returning flats and mag here is not strictly necessary
+        return (np.array(pit_i, 'int64'),
+                np.array(pit_j, 'int64'),
+                np.array(pit_prop, 'float64'),
+                flats,
+                mag)
+
     def _mk_connectivity_flats(self, i12, j1, j2, mat_data, flats, elev, mag):
         """
         Helper function for _mk_adjacency_matrix. This calcualtes the
@@ -1972,17 +2217,16 @@ class DEMProcessor(object):
             if len(loc_proportions > 2):
                 flat_j[ii] = drain_ids[2:]
                 flat_prop[ii] = loc_proportions[2:]
-                flat_i[ii] = np.ones(drain_ids[2:].size, int)\
-                    * ids_flats[one_id]
+                flat_i[ii] = np.ones(drain_ids[2:].size, 'int64') * ids_flats[one_id]
         try:
             flat_j = np.concatenate([fj for fj in flat_j if fj is not None])
             flat_prop = \
                 np.concatenate([fp for fp in flat_prop if fp is not None])
             flat_i = np.concatenate([fi for fi in flat_i if fi is not None])
         except:
-            flat_j = np.array([], dtype=int)
-            flat_prop = np.array([], dtype=float)
-            flat_i = np.array([], dtype=int)
+            flat_j = np.array([], 'int64')
+            flat_prop = np.array([], 'float64')
+            flat_i = np.array([], 'int64')
 
         if len(warn_flats) > 0:
             warnings.warn("Warning %d flats had no place" % len(warn_flats) +
@@ -2145,7 +2389,7 @@ def _get_flat_ids(assigned):
     # MPU optimization:
     # Let's segment the regions and store in a sparse format
     # First, let's use where once to find all the information we want
-    ids_labels = np.arange(len(assigned.ravel()), dtype=int)
+    ids_labels = np.arange(len(assigned.ravel()), 'int64')
     I = ids_labels[assigned.ravel().astype(bool)]
     labels = assigned.ravel()[I]
     # Now sort these arrays by the label to figure out where to segment
@@ -2159,8 +2403,6 @@ def _get_flat_ids(assigned):
 
     return [I, region_ids, labels]
 
-
-@numba.jit
 def _tarboton_slopes_directions(data, dX, dY, facets, ang_adj):
     """
     Calculate the slopes and directions based on the 8 sections from
@@ -2169,8 +2411,8 @@ def _tarboton_slopes_directions(data, dX, dY, facets, ang_adj):
     shp = np.array(data.shape) - 1
 
 
-    direction = np.ones(data.shape) * FLAT_ID_INT
-    mag = np.ones_like(direction) * FLAT_ID_INT
+    direction = np.full(data.shape, FLAT_ID_INT, 'float64')
+    mag = np.full(data.shape, FLAT_ID_INT, 'float64')
 
     slc0 = [slice(1, -1), slice(1, -1)]
     for ind in xrange(8):
@@ -2348,7 +2590,6 @@ def _get_d1_d2(dX, dY, ind, e1, e2, shp, topbot=None):
 
 
 # Let's calculate the slopes!
-@numba.jit
 def _calc_direction(data, mag, direction, ang, d1, d2, theta,
                     slc0, slc1, slc2):
     """
@@ -2356,29 +2597,48 @@ def _calc_direction(data, mag, direction, ang, d1, d2, theta,
     Tarboton's D_\infty method. This is a helper-function to
     _tarboton_slopes_directions
     """
-    s1 = (data[slc0] - data[slc1]) / d1
-    s2 = (data[slc1] - data[slc2]) / d2
-    sd = (data[slc0] - data[slc2]) / np.sqrt((d1 * d1 + d2 * d2))
+    
+    data0 = data[slc0]
+    data1 = data[slc1]
+    data2 = data[slc2]
+
+    s1 = (data0 - data1) / d1
+    s2 = (data1 - data2) / d2
+    s1_2 = s1**2
+    
+    sd = (data0 - data2) / np.sqrt(d1**2 + d2**2)
     r = np.arctan2(s2, s1)
-    rad2 = (s1)**2 + (s2)**2
+    rad2 = s1_2 + s2**2
 
     # Handle special cases
     # should be on diagonal
-    I1 = ((s1 <= 0) & (s2 > 0)) | (r > np.arctan2(d2, d1))
-    rad2[I1] = sd[I1] ** 2
-    r[I1] = theta.repeat(I1.shape[1], 1)[I1]
-    I2 = ((s1 > 0) & (s2 <= 0)) | (r < 0)  # should be on straight section
-    rad2[I2] = s1[I2]**2
-    r[I2] = 0
-    I3 = (s1 <= 0) & ((s2 <= 0) | ((s2 > 0) & (sd <= 0)))  # upslope or flat
+    b_s1_lte0 = s1 <= 0
+    b_s2_lte0 = s2 <= 0
+    b_s1_gt0 = s1 > 0
+    b_s2_gt0 = s2 > 0
+
+    I1 = (b_s1_lte0 & b_s2_gt0) | (r > theta)
+    if I1.any():
+        rad2[I1] = sd[I1] ** 2
+        r[I1] = theta.repeat(I1.shape[1], 1)[I1]
+    
+    I2 = (b_s1_gt0 & b_s2_lte0) | (r < 0)  # should be on straight section
+    if I2.any():
+        rad2[I2] = s1_2[I2]
+        r[I2] = 0
+    
+    I3 = b_s1_lte0 & (b_s2_lte0 | (b_s2_gt0 & (sd <= 0)))  # upslope or flat
     rad2[I3] = -1
 
     I4 = rad2 > mag[slc0]
-    mag[slc0][I4] = rad2[I4]
-    direction[slc0][I4] = r[I4] * ang[1] + ang[0] * np.pi/2
+    if I4.any():
+        mag[slc0][I4] = rad2[I4]
+        direction[slc0][I4] = r[I4] * ang[1] + ang[0] * np.pi/2
 
     return mag, direction
 
-
-
-
+def _get_dX_mean(dX, i1, i2):
+    if i1 == i2:
+        return dX[min(i1, dX.size-1)]
+    else:
+        return dX[make_slice(i1, i2)].mean()
