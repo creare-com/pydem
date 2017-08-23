@@ -460,6 +460,7 @@ class DEMProcessor(object):
     fill_flats_source_tol = 1
     fill_flats_peaks = True
     fill_flats_pits = True
+    fill_flats_max_iter = 10
     
     drain_pits = True
     drain_flats = False # will be ignored if drain_pits is True
@@ -917,6 +918,10 @@ class DEMProcessor(object):
         else: interp = region & ~replace
         out[interp] = (eH*dL[interp]**2 + e*dH[interp]**2) / (dL[interp]**2 + dH[interp]**2)
 
+        if it >= self.fill_flats_max_iter:
+            warnings.warn("Maximum iterations exceeded for fill_flats")
+            return
+
         # iterate to fill remaining flat areas (created during interpolation)
         flat = (spndi.minimum_filter(out, (3, 3)) >= out) & region
         if flat.any():
@@ -924,7 +929,7 @@ class DEMProcessor(object):
             flats, n = spndi.label(flat, structure=FLATS_KERNEL3)
             for i, _obj in enumerate(spndi.find_objects(flats)):
                 obj = grow_obj(_obj, roi.shape)
-                self._fill_flat(out[obj], out2[obj], flats[obj]==i+1, edge[obj])
+                self._fill_flat(out[obj], out2[obj], flats[obj]==i+1, edge[obj], it=it+1)
             out = out2
 
         # if debug:
