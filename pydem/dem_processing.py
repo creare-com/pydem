@@ -944,8 +944,6 @@ class DEMProcessor(object):
         self.mag, self.direction
         """
         
-        # TODO minimum filter behavior with nans?
-        
         # fill/interpolate flats first
         if self.fill_flats:
             data = np.ma.filled(self.data.astype('float64'), np.nan)
@@ -957,6 +955,7 @@ class DEMProcessor(object):
             if self.fill_flats_below_sea: sea_mask = data != 0
             else: sea_mask = data > 0
             flat = (spndi.minimum_filter(data, (3, 3)) >= data) & sea_mask
+            # TODO minimum filter behavior with nans?
 
             flats, n = spndi.label(flat, structure=FLATS_KERNEL3)
             objs = spndi.find_objects(flats)
@@ -965,7 +964,7 @@ class DEMProcessor(object):
                 obj = grow_obj(_obj, data.shape)
                 self._fill_flat(data[obj], filled[obj], flats[obj]==i+1, edge[obj])
 
-            self.data = np.ma.masked_array(filled, mask=np.isnan(filled)).astype(self.data.dtype)
+            self.data = np.ma.masked_array(filled, mask=np.isnan(filled))
 
         # %% Calculate the slopes and directions based on the 8 sections from
         # Tarboton http://www.neng.usu.edu/cee/faculty/dtarb/96wr03137.pdf
@@ -1589,7 +1588,7 @@ class DEMProcessor(object):
                                                 area.shape[0], area.shape[1],
                                                 edge_todo_tile.astype('float64').ravel(),
                                                 skip_edge=True)
-                edge_todo_tile = c.reshape(edge_todo_tile.shape)
+                edge_todo_tile = c.reshape(edge_todo_tile.shape).astype('bool')
             else:
                 a, b, c, d = cyutils.drain_area(area.ravel(),
                                                 done.ravel(),
@@ -1720,8 +1719,8 @@ class DEMProcessor(object):
             print ".",
             count += 1
             if CYTHON:
-                area_, done_, edge_todo_, edge_todo_no_mask_ = cyutils.drain_area(area_,
-                    done_, ids,
+                area_, done_, edge_todo_, edge_todo_no_mask_ = cyutils.drain_area(
+                    area_, done_, ids,
                     A.indptr, A.indices, A.data, B.indptr, B.indices,
                     area.shape[0], area.shape[1],
                     edge_todo_, edge_todo_no_mask_)

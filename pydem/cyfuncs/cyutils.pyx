@@ -99,7 +99,7 @@ def drain_area(np.ndarray[double, ndim=1] area,
                        &(edge_todo[0]), do_edge_todo,
                        &(edge_todo_no_mask[0]), do_edge_todo_no_mask,
                        skip_edge)
-    return area, done, edge_todo.astype('bool'), edge_todo_no_mask.astype('bool')
+    return area, done, edge_todo, edge_todo_no_mask
 
 
 cdef void _drain_area(double *area, DTYPEb_t* done,
