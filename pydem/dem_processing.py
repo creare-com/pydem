@@ -839,10 +839,7 @@ class DEMProcessor(object):
             arr1[te+i1:be+i2, le+j1:re+j2] = arr2[i1:i2b, j1:j2b]
 
     def find_flats(self):
-        flats = self._find_flats_edges(self.data, self.mag, self.direction)
-        self.direction[flats] = FLAT_ID_INT
-        self.mag[flats] = FLAT_ID_INT
-        self.flats = flats
+        self.flats = self.mag == FLAT_ID_INT
 
     def _fill_flat(self, roi, out, region, edge, it=0, debug=False):
         e = roi[region][0]
@@ -977,8 +974,10 @@ class DEMProcessor(object):
             # but the downstream pixel at the edge of a flat will have a
             # calcuable angle which will not be accurate. We have to also find
             # these edges and set their magnitude to -1 (that is, the flat_id)
-
-            self.find_flats()
+            flats = self._find_flats_edges(self.data, self.mag, self.direction)
+            self.direction[flats] = FLAT_ID_INT
+            self.mag[flats] = FLAT_ID_INT
+            self.flats = flats
         else:
             self.direction = np.full(self.data.shape, FLAT_ID_INT, 'float64')
             self.mag = np.full(self.data.shape, FLAT_ID_INT, 'float64')
