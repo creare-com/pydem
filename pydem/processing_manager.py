@@ -606,7 +606,7 @@ class ProcessManager(object):
         if not os.path.isdir(save_path):
             os.makedirs(save_path)
 
-        subdirs = ['ang', 'mag', 'uca', 'twi', 'uca_edge_corrected', 'edge']
+        subdirs = ['elev', 'ang', 'mag', 'uca', 'twi', 'uca_edge_corrected', 'edge']
         for subdir in subdirs:
             if not os.path.isdir(os.path.join(save_path,  subdir)):
                 os.makedirs(os.path.join(save_path,  subdir))
@@ -781,22 +781,31 @@ class ProcessManager(object):
             return fn, 'Cached'
 
         # only calculate the slopes and direction if they do not exist in cache
+        fn_ele = dem_proc.get_full_fn('ele', save_path)
         fn_ang = dem_proc.get_full_fn('ang', save_path)
         fn_mag = dem_proc.get_full_fn('mag', save_path)
-        if os.path.exists(fn_ang + '.npz') and os.path.exists(fn_mag + '.npz')\
-                and not self.overwrite_cache:
+        if (not self.overwrite_cache and
+            os.path.exists(fn_ele + '.npz') and
+            os.path.exists(fn_and + '.npz') and
+            os.path.exists(fn_mag + '.npz')):
+            dem_proc.load_elevation(fn_ele)
             dem_proc.load_direction(fn_ang)
             dem_proc.load_slope(fn_mag)
             dem_proc.find_flats()
         else:
-            if os.path.exists(fn_ang + '.npz') and os.path_exists(fn_mag + '.npz')\
-                    and self.overwrite_cache:
+            if (self.overwrite_cache and
+                os.path.exists(fn_ele + '.npz') and
+                os.path_exists(fn_ang + '.npz') and
+                os.path_exists(fn_mag + '.npz')):
+                os.remove(fn_ele)
                 os.remove(fn_ang)
                 os.remove(fn_mag)
             dem_proc.calc_slopes_directions()
+            dem_proc.save_elevation(save_path, raw=True)
             dem_proc.save_slope(save_path, raw=True)
             dem_proc.save_direction(save_path, raw=True)
         if self._DEBUG:
+            dem_proc.save_elevation(save_path, as_int=False)
             dem_proc.save_slope(save_path, as_int=False)
             dem_proc.save_direction(save_path, as_int=False)
 

@@ -700,6 +700,11 @@ class DEMProcessor(object):
         # self.twi = self.flats
         self.save_array(self.twi, None, 'twi', rootpath, raw, as_int=as_int)
 
+    def save_elevation(self, rootpath, raw=False, as_int=False):
+        """ Saves the (interpolated/filled) elevation to a file
+        """
+        self.save_array(self.mag, None, 'elev', rootpath, raw, as_int=as_int)
+
     def save_slope(self, rootpath, raw=False, as_int=False):
         """ Saves the magnitude of the slope to a file
         """
@@ -736,6 +741,11 @@ class DEMProcessor(object):
 
         else:
             raise RuntimeError("File %s does not exist." % (fn + '.npz'))
+
+    def load_elevation(self, fn):
+        """Loads pre-computed (interpolated/filled) elevation from file
+        """
+        self.load_array(fn, 'elev')
 
     def load_slope(self, fn):
         """Loads pre-computed slope magnitude from file
@@ -943,6 +953,7 @@ class DEMProcessor(object):
         
         # fill/interpolate flats first
         if self.fill_flats:
+            print "starting flat elevation filling"
             data = np.ma.filled(self.data.astype('float64'), np.nan)
             filled = data.copy()
             
