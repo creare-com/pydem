@@ -256,3 +256,6 @@ When installing pydem using the provided setup.py file, the commandline utilitie
 Tarboton, D. G. (1997). A new method for the determination of flow directions and upslope areas in grid digital elevation models. Water resources research, 33(2), 309-319.
 
 Ueckermann, Mattheus P., et al. (2015). "pyDEM: Global Digital Elevation Model Analysis." In K. Huff & J. Bergstra (Eds.), Scipy 2015: 14th Python in Science Conference. Paper presented at Austin, Texas, 6 - 12 July (pp. 117 - 124). [http://conference.scipy.org/proceedings/scipy2015/mattheus_ueckermann.html](http://conference.scipy.org/proceedings/scipy2015/mattheus_ueckermann.html)
+
+## 5. Attributions
+pyDEM uses [lib.pyx](https://github.com/alexlib/openpiv-python/blob/cython_safe_installation/openpiv/c_src/lib.pyx) from the [OpenPIV](https://github.com/alexlib/openpiv-python) project for [inpainting](pydem/pydem/reader/inpaint.pyx) missing values in the final outputs. 
