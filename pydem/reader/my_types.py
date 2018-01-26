@@ -19,7 +19,15 @@ from traits.api import *
 import numpy as np
 import gdal
 import gdalconst
-import matplotlib, matplotlib.cm
+try:
+    import matplotlib, matplotlib.cm
+except:
+    class Dum(object):
+        pass
+    matplotlib = Dum()
+    matplotlib.cm = Dum()
+    matplotlib.colors = Dum()
+    matplotlib.colors.Colormap = Dum()
 
 NO_DATA_VALUE = -9999
 
@@ -482,5 +490,3 @@ class StagingPointDataLayer(StagingLayerMixin, AbstractPointDataLayer):
 
 class ResultsPointDataLayer(ResultsLayerMixin, AbstractPointDataLayer):
     pass
-
-

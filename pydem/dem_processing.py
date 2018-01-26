@@ -504,10 +504,10 @@ class DEMProcessor(object):
     uca_saturation_limit = 32  # units of area
     twi_min_slope = 1e-3  # Used for TWI max limiting
     twi_min_area = np.inf  # Finds min area in tile
-    chunk_size_slp_dir = 512  # Size of chunk (without overlaps)
+    chunk_size_slp_dir = 5000 # Size of chunk (without overlaps)
     # This has to be > 1 to avoid edge effects for flats
     chunk_overlap_slp_dir = 4  # Overlap when calculating magnitude/directions
-    chunk_size_uca = 512  # Size of chunks when calculating UCA
+    chunk_size_uca = 5000 # Size of chunks when calculating UCA
     chunk_overlap_uca = 32  # Number of overlapping pixels for UCA calculation
     # Mostly deprecated, but maximum number of iterations used to try and
     # resolve circular drainage patterns (which should never occur)
@@ -673,13 +673,13 @@ class DEMProcessor(object):
             s_file.export_to_geotiff(tmp_file)
 
             if as_int:
-                cmd = "gdalwarp -multi -wm 2000 -co BIGTIFF=YES -of GTiff -co compress=lzw -ot Int16 -co TILED=YES -wo OPTIMIZE_SIZE=YES -r near -t_srs %s %s %s" \
+                cmd = "gdalwarp -overwrite -multi -wm 2000 -co BIGTIFF=YES -of GTiff -co compress=lzw -ot Int16 -co TILED=YES -wo OPTIMIZE_SIZE=YES -r near -t_srs %s %s %s" \
                     % (self.save_projection, tmp_file, fnl_file)
             else:
-                cmd = "gdalwarp -multi -wm 2000 -co BIGTIFF=YES -of GTiff -co compress=lzw -co TILED=YES -wo OPTIMIZE_SIZE=YES -r near -t_srs %s %s %s" \
+                cmd = "gdalwarp -overwrite -multi -wm 2000 -co BIGTIFF=YES -of GTiff -co compress=lzw -co TILED=YES -wo OPTIMIZE_SIZE=YES -r near -t_srs %s %s %s" \
                     % (self.save_projection, tmp_file, fnl_file)
             print "<<"*4, cmd, ">>"*4
-            subprocess.call(cmd)
+            subprocess.call(cmd, shell=True)
             os.remove(tmp_file)
         else:
             np.savez_compressed(fnl_file, array)
@@ -939,6 +939,28 @@ class DEMProcessor(object):
                 self._fill_flat(out[obj], out2[obj], flats[obj]==i+1, edge[obj], it=it+1)
             out = out2
 
+    def calc_fill_flats(self):
+        """
+        Fill/interpolate flats, if they have not yet been filled. This
+        is to be done prior to self.calc_slopes_directions.
+        """
+        # fill/interpolate flats first
+        data = np.ma.filled(self.data.astype('float64'), np.nan)
+        filled = data.copy()
+        edge = np.ones_like(data, bool)
+        edge[1:-1, 1:-1] = False
+        if self.fill_flats_below_sea: sea_mask = data != 0
+        else: sea_mask = data > 0
+        flat = (spndi.minimum_filter(data, (3, 3)) >= data) & sea_mask
+        # TODO minimum filter behavior with nans?
+        flats, n = spndi.label(flat, structure=FLATS_KERNEL3)
+        objs = spndi.find_objects(flats)
+        for i, _obj in enumerate(objs):
+            obj = grow_obj(_obj, data.shape)
+            self._fill_flat(data[obj], filled[obj], flats[obj]==i+1, edge[obj])
+        self.data = np.ma.masked_array(filled, mask=np.isnan(filled))
+        
+
         # if debug:
         #     from matplotlib import pyplot
         #     from utils import plot_flat
@@ -951,28 +973,8 @@ class DEMProcessor(object):
         self.mag, self.direction
         """
         
-        # fill/interpolate flats first
         if self.fill_flats:
-            print "starting flat elevation filling"
-            data = np.ma.filled(self.data.astype('float64'), np.nan)
-            filled = data.copy()
-            
-            edge = np.ones_like(data, bool)
-            edge[1:-1, 1:-1] = False
-
-            if self.fill_flats_below_sea: sea_mask = data != 0
-            else: sea_mask = data > 0
-            flat = (spndi.minimum_filter(data, (3, 3)) >= data) & sea_mask
-            # TODO minimum filter behavior with nans?
-
-            flats, n = spndi.label(flat, structure=FLATS_KERNEL3)
-            objs = spndi.find_objects(flats)
-
-            for i, _obj in enumerate(objs):
-                obj = grow_obj(_obj, data.shape)
-                self._fill_flat(data[obj], filled[obj], flats[obj]==i+1, edge[obj])
-
-            self.data = np.ma.masked_array(filled, mask=np.isnan(filled))
+            self.calc_fill_flats()        
 
         # %% Calculate the slopes and directions based on the 8 sections from
         # Tarboton http://www.neng.usu.edu/cee/faculty/dtarb/96wr03137.pdf
@@ -1725,8 +1727,14 @@ class DEMProcessor(object):
             edge_todo_no_mask_ = edge_todo_no_mask.astype('float64').ravel()
         data_ = data.ravel()
 
-        while (np.any(~done) and count < self.circular_ref_maxcount):
-            print ".",
+        done_ = done.ravel()
+        done_sum = 0
+        max_elev = -1
+        while (np.any(~done_) and count < self.circular_ref_maxcount)\
+                and done_sum != done_.sum():
+            print ".", #done_sum, done_.sum(), max_elev, count,
+            import sys;sys.stdout.flush()
+            done_sum = done_.sum()
             count += 1
             if CYTHON:
                 area_, done_, edge_todo_, edge_todo_no_mask_ = cyutils.drain_area(
