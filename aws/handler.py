@@ -1,11 +1,8 @@
 from __future__ import division, unicode_literals, print_function, absolute_import
 
-import base64
 import json
 import boto3
 import subprocess
-from io import BytesIO
-from collections import OrderedDict
 import sys, os
 if sys.version_info.major == 2:
     import urllib
@@ -14,7 +11,7 @@ else:
 sys.path.append('/tmp')
 
 api_root = 'https://.'
-s3_bucket = 'pydem-s3'
+s3_bucket = 'twi-processing'
 s3 = boto3.client('s3')
 deps = 'pydem_deps.zip'
 
@@ -39,64 +36,77 @@ def return_exception(e, event, context):
         'isBase64Encoded': False,
     }
 
-def handler(event, context, get_deps=True):
-
-    # Get request arguments
-    try:
-        qs = event.get('queryStringParameters', event)
-        service = urllib.unquote(qs['SERVICE'])
-        version = urllib.unquote(qs['VERSION'])
-        request = urllib.unquote(qs['REQUEST'])
-        fmt = urllib.unquote(qs['FORMAT'])
-        time = urllib.unquote(qs['TIME'])
-        bbox = urllib.unquote(qs['BBOX']).split(',')
-        crs = urllib.unquote(qs['CRS'])
-        response_crs = urllib.unquote(qs['RESPONSE_CRS'])
-        width = int(urllib.unquote(qs['WIDTH']))
-        height = int(urllib.unquote(qs['HEIGHT']))
-        params = urllib.unquote(qs['PARAMS'])
-        pipeline = json.loads(params, object_pairs_hook=OrderedDict)['pipeline']
-        try:
-            pipeline = json.loads(pipeline, object_pairs_hook=OrderedDict)
-        except:
-            pass
-    except Exception as e:
-        return return_exception(e, event, context)
-
-    # Download additional dependencies ( we should do this in a thread )
+def getDeps():
+    # Download additional dependencies
     if get_deps:
         s3.download_file(s3_bucket, 'pydem/' + deps, '/tmp/' + deps)
 
         subprocess.call(['unzip', '/tmp/' + deps, '-d', '/tmp'])
         subprocess.call(['rm', '/tmp/' + deps])
 
+def handler(event, context, callback, get_deps=True):
 
-    from pydem.dem_processing import DEMProcessor
     try:
-        # TODO get filename from event, handle each file type
-        # For secondary steps, will need to trace back to .tiff file,
-        # or can DEMProcessor just be constructed for the ang/mag/etc file?
-        demproc = DEMProcessor(filename)
+        srcKey = urllib.unquote(event.Records[0].s3.object.key.replace(r'/\+/g', " "))
+        # Infer the file type.
+        typeMatch = srcKey.match(r'/\.([^.]*)$/')
+        if !typeMatch:
+            callback("Could not determine the file type.")
+            return
+        fileType = typeMatch[1]
+        if (fileType != "tiff" && fileType != "tif" && fileType != "npz"):
+            callback('Unsupported file type: ' + fileType)
+            return
+
+        if 'elev' in srcKey:
+            # Do nothing
+            return
+        elif 'mag' in srcKey:
+            s3.download_file(s3_bucket, 'pydem/' + srcKey, '/tmp/' + srcKey) # mag npz file
+            elev = srcKey.replace('mag', 'elev')
+            ang = srcKey.replace('mag', 'ang')
+            s3.download_file(s3_bucket, 'data/' + elev, '/tmp/' + elev) # elev npz file
+            s3.download_file(s3_bucket, 'data/' + ang, '/tmp/' + ang) # ang npz file
+            getDeps()
+            from pydem.dem_processing import DEMProcessor
+
+            # TODO create dem_proc, set slope/ang/elev to files downloaded from s3
+            # then calculate TWI. Something like:
+            #
+            # demproc = DEMProcessor('/tmp/' + srcKey.replace('mag', ''))
+            #
+            # demproc.elev = '/tmp/' + elev # ?
+            # demproc.ang = '/tmp/' + ang # ?
+            # demproc.mag = '/tmp/' + mag # ?
+            #
+            # uca, twi = demproc.calc_twi()
+        elif 'ang' in srcKey:
+            # Ignore this - handled by mag case
+            return
+        elif 'uca' in srcKey:
+            # Do nothing
+            return
+        elif 'twi' in srcKey:
+            # Do nothing
+            return
+        elif 'tif' in srcKey or 'tiff' in srcKey:
+            # This is the case of a raw tiff file being uploaded.
+            s3.download_file(s3_bucket, 'pydem/' + srcKey, '/tmp/' + srcKey) # raw tiff file
+            getDeps()
+            from pydem.dem_processing import DEMProcessor
+            demproc = DEMProcessor('/tmp/' + srcKey)
+            demproc.calc_slopes_directions()
+            # TODO Save slope/direction to file and upload to s3, see
+            # processing_manager.tile_edge.update_edges(esfile, dem_proc) or
+            # save/load array in DEMProcessor
+            demproc.save_elevation('/tmp', raw=True)
+            demproc.save_direction('/tmp', raw=True)
+            demproc.save_slope('/tmp', raw=True)
+            s3.upload_file(s3_bucket, 'pydem/' + )
+
+
     except Exception as e:
         return return_exception(e, event, context, pipeline)
 
-#
-# if __name__ == '__main__' and len(sys.argv) >= 2 and sys.argv[1] == 'test':
-#     event = {
-#         "SERVICE": "WMS",
-#         "VERSION": "1.0.0",
-#         "REQUEST": "GetCoverage",
-#         "FORMAT": "image/png",
-#         "COVERAGE": "PIPELINE",
-#         "TIME": "2017-08-08T12:00:00",
-#         "BBOX": "-77.1,39.0,-76.8,39.3",
-#         "CRS": "EPSG:4326",
-#         "RESPONSE_CRS": "EPSG:4326",
-#         "WIDTH": "256",
-#         "HEIGHT": "256",
-#         "PARAMS": "%7B%22pipeline%22%3A%22%7B%5Cn%20%20%5C%22nodes%5C%22%3A%20%7B%5Cn%20%20%20%20%20%20%5C%22sm%5C%22%3A%20%7B%5Cn%20%20%20%20%20%20%20%20%20%20%5C%22node%5C%22%3A%20%5C%22datalib.smap.SMAP%5C%22%2C%5Cn%20%20%20%20%20%20%20%20%20%20%5C%22attrs%5C%22%3A%20%7B%5Cn%20%20%20%20%20%20%20%20%20%20%20%20%20%20%5C%22product%5C%22%3A%20%5C%22SPL4SMAU.003%5C%22%2C%5Cn%20%20%20%20%20%20%20%20%20%20%20%20%20%20%5C%22interpolation%5C%22%3A%20%5C%22nearest%5C%22%5Cn%20%20%20%20%20%20%20%20%20%20%7D%5Cn%20%20%20%20%20%20%7D%5Cn%20%20%7D%2C%5Cn%20%20%5C%22outputs%5C%22%3A%20%5B%5Cn%20%20%20%20%20%20%7B%5Cn%20%20%20%20%20%20%20%20%20%20%5C%22mode%5C%22%3A%20%5C%22image%5C%22%2C%5Cn%20%20%20%20%20%20%20%20%20%20%5C%22format%5C%22%3A%20%5C%22png%5C%22%2C%5Cn%20%20%20%20%20%20%20%20%20%20%5C%22nodes%5C%22%3A%20%5B%5C%22sm%5C%22%5D%5Cn%20%20%20%20%20%20%7D%20%20%20%5Cn%20%20%5D%5Cn%7D%5Cn%22%7D"
-#         }
-#     # %7B%22pipeline%22%3A%22%7B%5Cn%20%20%5C%22nodes%5C%22%3A%20%7B%5Cn%20%20%20%20%20%20%5C%22sm%5C%22%3A%20%7B%5Cn%20%20%20%20%20%20%20%20%20%20%5C%22node%5C%22%3A%20%5C%22datalib.smap.SMAP%5C%22%2C%5Cn%20%20%20%20%20%20%20%20%20%20%5C%22attrs%5C%22%3A%20%7B%5Cn%20%20%20%20%20%20%20%20%20%20%20%20%20%20%5C%22product%5C%22%3A%20%5C%22SPL4SMAU.003%5C%22%2C%5Cn%20%20%20%20%20%20%20%20%20%20%20%20%20%20%5C%22interpolation%5C%22%3A%20%5C%22nearest%5C%22%5Cn%20%20%20%20%20%20%20%20%20%20%7D%5Cn%20%20%20%20%20%20%7D%5Cn%20%20%7D%2C%5Cn%20%20%5C%22outputs%5C%22%3A%20%5B%5Cn%20%20%20%20%20%20%7B%5Cn%20%20%20%20%20%20%20%20%20%20%5C%22mode%5C%22%3A%20%5C%22image%5C%22%2C%5Cn%20%20%20%20%20%20%20%20%20%20%5C%22format%5C%22%3A%20%5C%22png%5C%22%2C%5Cn%20%20%20%20%20%20%20%20%20%20%5C%22nodes%5C%22%3A%20%5B%5C%22sm%5C%22%5D%5Cn%20%20%20%20%20%20%7D%20%20%20%5Cn%20%20%5D%5Cn%7D%5Cn%22%7D
-#     # -77.1,39.0,-76.8,39.3
-#     # https://22d3a0pwlf.execute-api.us-east-1.amazonaws.com/prod/?SERVICE=WMS&VERSION=1.0.0&REQUEST=GetCoverage&FORMAT=image%2Fpng&COVERAGE=PIPELINE&TIME=2017-08-08T12%3A00%3A00&BBOX=-77.1%2C39.0%2C-76.8%2C39.3&CRS=EPSG:4326&RESPONSE_CRS=EPSG:4326&WIDTH=256&HEIGHT=256&PARAMS=%7B%22pipeline%22%3A%22%7B%5Cn%20%20%5C%22nodes%5C%22%3A%20%7B%5Cn%20%20%20%20%20%20%5C%22sm%5C%22%3A%20%7B%5Cn%20%20%20%20%20%20%20%20%20%20%5C%22node%5C%22%3A%20%5C%22datalib.smap.SMAP%5C%22%2C%5Cn%20%20%20%20%20%20%20%20%20%20%5C%22attrs%5C%22%3A%20%7B%5Cn%20%20%20%20%20%20%20%20%20%20%20%20%20%20%5C%22product%5C%22%3A%20%5C%22SPL4SMAU.003%5C%22%2C%5Cn%20%20%20%20%20%20%20%20%20%20%20%20%20%20%5C%22interpolation%5C%22%3A%20%5C%22bilinear%5C%22%5Cn%20%20%20%20%20%20%20%20%20%20%7D%5Cn%20%20%20%20%20%20%7D%5Cn%20%20%7D%2C%5Cn%20%20%5C%22outputs%5C%22%3A%20%5B%5Cn%20%20%20%20%20%20%7B%5Cn%20%20%20%20%20%20%20%20%20%20%5C%22mode%5C%22%3A%20%5C%22image%5C%22%2C%5Cn%20%20%20%20%20%20%20%20%20%20%5C%22format%5C%22% A%20%5C%22png%5C%22%2C%5Cn%20%20%20%20%20%20%20%20%20%20%5C%22nodes%5C%22%3A%20%5B%5C%22sm%5C%22%5D%5Cn%20%20%20%20%20%20%7D%20%20%20%5Cn%20%20%5D%5Cn%7D%5Cn%22%7D
-#     pipeline = handler(event, {}, get_deps=False)
+if __name__ == "__main__":
+    # test
