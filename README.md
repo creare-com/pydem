@@ -1,7 +1,7 @@
 # pyDEM: A python digital elevation model analysis package
 -----------------------------------------------------------
 
-PyDEM is a package for topographic (terrain) analysis written in Python (with a
+PyDEM is a package for topographic (terrain) analysis written in Python 2.7 (with a
 bit of Cython). It takes in digital elevation model (DEM) rasters, and it 
 outputs quantities like slope, aspect, upstream area, and topographic wetness
 index. PyDEM closely follows the approach taken by TauDEM to calculate these
