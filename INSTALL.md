@@ -1,5 +1,5 @@
 # Installation Instructions
-
+NoteL: pyDEM currently only supports Python 2.7.
 
 ## Windows
 
