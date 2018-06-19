@@ -461,7 +461,7 @@ class DEMProcessor(object):
     fill_flats_peaks = True
     fill_flats_pits = True
     fill_flats_max_iter = 10
-    
+
     drain_pits = True
     drain_flats = False # will be ignored if drain_pits is True
     drain_pits_max_iter = 100
@@ -512,6 +512,9 @@ class DEMProcessor(object):
     # Mostly deprecated, but maximum number of iterations used to try and
     # resolve circular drainage patterns (which should never occur)
     circular_ref_maxcount = 50
+    # Default maximum surface area of pit artifacts resulting from quantization
+    # that will be filled
+    maximum_pit_area = 32
 
     # The pixel coordinates for the different facets used to calculate the
     # D_infty magnitude and direction (from Tarboton)
@@ -818,24 +821,24 @@ class DEMProcessor(object):
             Default False. If true, the data in arr2 will be added to arr1,
             otherwise data in arr2 will overwrite data in arr1
         """
-        
+
         if te == 0:
             i1 = 0
         else:
             i1 = ovr
-        
+
         if be == data.shape[0]:
             i2 = 0
             i2b = None
         else:
             i2 = -ovr
             i2b = -ovr
-        
+
         if le == 0:
             j1 = 0
         else:
             j1 = ovr
-        
+
         if re == data.shape[1]:
             j2 = 0
             j2b = None
@@ -876,9 +879,9 @@ class DEMProcessor(object):
         source = border & (roi > e)
 
         replace = None
-        
+
         # update source and set eH (high elevation for interpolation)
-        
+
         # if (it == 0 and drain.any() and (region & edge).any() and (region & edge & get_border_mask(source) & ~get_border_mask(drain)).any()):
         #     # Downstream side of river beds that cross an edge: drain from edge
         #     replace = region & edge & get_border_mask(source) & ~get_border_mask(drain)
@@ -939,11 +942,48 @@ class DEMProcessor(object):
                 self._fill_flat(out[obj], out2[obj], flats[obj]==i+1, edge[obj], it=it+1)
             out = out2
 
+    def calc_fill_pit_artifacts(self):
+        """
+        Correct pits, up to a maximum surface area, that are artifacts of elevation
+        quantization.
+        """
+
+        self.filledPits = self.data.copy()
+        if self.fill_flats_below_sea:
+            sea_mask = self.data != 0
+        else:
+            sea_mask = self.data > 0
+        flat = (spndi.minimum_filter(self.data, (3, 3)) >= self.data) & sea_mask
+        flats, n = spndi.label(flat, structure=FLATS_KERNEL3)
+        objs = spndi.find_objects(flats)
+        cnt = 0
+        max_size = {}
+        for i, _obj in enumerate(objs):
+            obj = grow_obj(_obj, self.data.shape)
+            if not (self.data[obj].shape[0] == self.data[_obj].shape[0] + 2 and self.data[obj].shape[1] == self.data[_obj].shape[1] + 2):
+                continue
+            mask = flats[obj] == i+1
+            edge_mask = spndi.maximum_filter(mask, (3, 3)) ^ mask
+            my_elev = self.data[obj][mask][0]
+            edge_condition = np.all(self.data[obj][edge_mask] - 1 == my_elev)
+            if edge_condition and mask.sum() <= self.maximum_pit_area:
+                if mask.sum() not in max_size:
+                    max_size[mask.sum()] = 0
+                max_size[mask.sum()] += 1
+                cnt = cnt + 1
+                self.filledPits[obj] += 1*mask
+        self.data = np.ma.masked_array(self.filledPits, mask=np.isnan(self.filledPits))
+
+
     def calc_fill_flats(self):
         """
         Fill/interpolate flats, if they have not yet been filled. This
         is to be done prior to self.calc_slopes_directions.
         """
+
+        if self.maximum_pit_area:
+            self.calc_fill_pit_artifacts()
+
         # fill/interpolate flats first
         data = np.ma.filled(self.data.astype('float64'), np.nan)
         filled = data.copy()
@@ -959,7 +999,7 @@ class DEMProcessor(object):
             obj = grow_obj(_obj, data.shape)
             self._fill_flat(data[obj], filled[obj], flats[obj]==i+1, edge[obj])
         self.data = np.ma.masked_array(filled, mask=np.isnan(filled))
-        
+
 
         # if debug:
         #     from matplotlib import pyplot
@@ -972,9 +1012,9 @@ class DEMProcessor(object):
         Calculates the magnitude and direction of slopes and fills
         self.mag, self.direction
         """
-        
+
         if self.fill_flats:
-            self.calc_fill_flats()        
+            self.calc_fill_flats()
 
         # %% Calculate the slopes and directions based on the 8 sections from
         # Tarboton http://www.neng.usu.edu/cee/faculty/dtarb/96wr03137.pdf
@@ -1643,7 +1683,7 @@ class DEMProcessor(object):
 #                #Follow the drainage along. New candidates are cells that just changed
 #                ids = (edge_todo_old.ravel() != arr.ravel())
             return arr
-        
+
         if CYTHON:
             a = cyutils.drain_connections(edge_todo.ravel(),
                                           ids, B.indptr, B.indices,
@@ -1719,12 +1759,10 @@ class DEMProcessor(object):
         ids_old = np.zeros_like(ids)
         # %%
         count = 1
-        
+
         if CYTHON:
             area_ = area.ravel()
             done_ = done.ravel()
-            edge_todo_ = edge_todo.astype('float64').ravel()
-            edge_todo_no_mask_ = edge_todo_no_mask.astype('float64').ravel()
         data_ = data.ravel()
 
         done_ = done.ravel()
@@ -1737,6 +1775,8 @@ class DEMProcessor(object):
             done_sum = done_.sum()
             count += 1
             if CYTHON:
+                edge_todo_ = edge_todo.astype('float64').ravel()
+                edge_todo_no_mask_ = edge_todo_no_mask.astype('float64').ravel()
                 area_, done_, edge_todo_, edge_todo_no_mask_ = cyutils.drain_area(
                     area_, done_, ids,
                     A.indptr, A.indices, A.data, B.indptr, B.indices,
@@ -1885,7 +1925,7 @@ class DEMProcessor(object):
         j1, j2 = self._mk_connectivity(section, i12, j1, j2)
         j = np.row_stack((j1, j2))
         i = np.row_stack((i12, i12))
-        
+
         # connectivity for flats/pits
         if self.drain_pits:
             pit_i, pit_j, pit_prop, flats, mag = \
@@ -2035,14 +2075,14 @@ class DEMProcessor(object):
         but non-adjacent pixels. The slope magnitude (and flats mask) is
         updated for these pits and flats so that the TWI can be computed.
         """
-        
+
         e = elev.data.ravel()
 
         pit_i = []
         pit_j = []
         pit_prop = []
         warn_pits = []
-        
+
         pits = i12[flats & (elev > 0)]
         I = np.argsort(e[pits])
         for pit in pits[I]:
@@ -2065,7 +2105,7 @@ class DEMProcessor(object):
             if drain is None:
                 warn_pits.append(pit)
                 continue
-            
+
             ipit, jpit = np.unravel_index(pit, elev.shape)
             Idrain, Jdrain = np.unravel_index(drain, elev.shape)
 
@@ -2079,7 +2119,7 @@ class DEMProcessor(object):
                 drain = drain[b]
                 Idrain = Idrain[b]
                 Jdrain = Jdrain[b]
-            
+
             # calculate real distances
             dx = [_get_dX_mean(dX, ipit, idrain) * (jpit - jdrain)
                   for idrain, jdrain in zip(Idrain, Jdrain)]
@@ -2094,7 +2134,7 @@ class DEMProcessor(object):
                     continue
                 drain = drain[b]
                 dxy = dxy[b]
-            
+
             # calculate magnitudes
             s = (e[pit]-e[drain]) / dxy
 
@@ -2103,7 +2143,7 @@ class DEMProcessor(object):
             pit_i += [pit for i in drain]
             pit_j += drain.tolist()
             pit_prop += s.tolist()
-            
+
             # update pit magnitude and flats mask
             mag[ipit, jpit] = np.mean(s)
             flats[ipit, jpit] = False
@@ -2111,7 +2151,7 @@ class DEMProcessor(object):
         if warn_pits:
             warnings.warn("Warning %d pits had no place to drain to in this "
                           "chunk" % len(warn_pits))
-        
+
         # Note: returning flats and mag here is not strictly necessary
         return (np.array(pit_i, 'int64'),
                 np.array(pit_j, 'int64'),
@@ -2619,7 +2659,7 @@ def _calc_direction(data, mag, direction, ang, d1, d2, theta,
     Tarboton's D_\infty method. This is a helper-function to
     _tarboton_slopes_directions
     """
-    
+
     data0 = data[slc0]
     data1 = data[slc1]
     data2 = data[slc2]
@@ -2627,7 +2667,7 @@ def _calc_direction(data, mag, direction, ang, d1, d2, theta,
     s1 = (data0 - data1) / d1
     s2 = (data1 - data2) / d2
     s1_2 = s1**2
-    
+
     sd = (data0 - data2) / np.sqrt(d1**2 + d2**2)
     r = np.arctan2(s2, s1)
     rad2 = s1_2 + s2**2
@@ -2643,12 +2683,12 @@ def _calc_direction(data, mag, direction, ang, d1, d2, theta,
     if I1.any():
         rad2[I1] = sd[I1] ** 2
         r[I1] = theta.repeat(I1.shape[1], 1)[I1]
-    
+
     I2 = (b_s1_gt0 & b_s2_lte0) | (r < 0)  # should be on straight section
     if I2.any():
         rad2[I2] = s1_2[I2]
         r[I2] = 0
-    
+
     I3 = b_s1_lte0 & (b_s2_lte0 | (b_s2_gt0 & (sd <= 0)))  # upslope or flat
     rad2[I3] = -1
 
