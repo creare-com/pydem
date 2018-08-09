@@ -58,7 +58,7 @@ cmd = ['zip', '-9', '-rqy', 'pydem_deps.zip'] + deps
 subprocess.call(cmd)
 
 # upload zip files to s3
-bucket = 'pydem-s3'
+bucket = 'twi-processing'
 s3 = boto3.client('s3')
-s3.upload_file('pydem_dist.zip', bucket, 'pydem_dist.zip')
-s3.upload_file('pydem_deps.zip', bucket, 'pydem_deps.zip')
+s3.upload_file('pydem_dist.zip', bucket, 'pydem/pydem_dist.zip')
+s3.upload_file('pydem_deps.zip', bucket, 'pydem/pydem_deps.zip')

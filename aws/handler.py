@@ -2,20 +2,27 @@ from __future__ import division, unicode_literals, print_function, absolute_impo
 
 import json
 import boto3
+import botocore
 import subprocess
 import sys, os
 if sys.version_info.major == 2:
     import urllib
 else:
     import urllib.parse as urllib
-sys.path.append('/tmp')
+if not os.path.isdir('/tmp/'):
+    os.mkdir('/tmp/')
+sys.path.append('/tmp/')
+
+s3 = boto3.resource('s3')
 
 api_root = 'https://.'
 s3_bucket = 'twi-processing'
-s3 = boto3.client('s3')
 deps = 'pydem_deps.zip'
 
 def return_exception(e, event, context):
+    print(e)
+    exc_type, exc_obj, tb = sys.exc_info()
+    line_no = tb.tb_lineno
     events = str(event)
     contexts = str(context)
     try:
@@ -32,31 +39,58 @@ def return_exception(e, event, context):
         },
         'body': '<h1>Event</h1><br><br><br>' + str(event)\
                 + '<h1>Context</h1><br><br><br>' + str(context)
-                + '<h1>Exception</h1><br><br><br>' + str(e),
+                + '<h1>Exception</h1><br><br><br>' + str(e)
+                + '<h1>Line number</h1><br><br><br>' + str(line_no),
         'isBase64Encoded': False,
     }
 
 def getDeps():
     # Download additional dependencies
-    if get_deps:
-        s3.download_file(s3_bucket, 'pydem/' + deps, '/tmp/' + deps)
-
-        subprocess.call(['unzip', '/tmp/' + deps, '-d', '/tmp'])
-        subprocess.call(['rm', '/tmp/' + deps])
-
-def handler(event, context, callback, get_deps=True):
-
+    # if get_deps: # Not sure what this flag is supposed to be.
+    srcKey = 'pydem/' + deps
     try:
-        srcKey = urllib.unquote(event.Records[0].s3.object.key.replace(r'/\+/g', " "))
+        s3.Bucket(s3_bucket).download_file(srcKey, '/tmp/' + deps)
+    except botocore.exceptions.ClientError as e:
+        if e.response['Error']['Code'] == "404":
+            print("The object does not exist.")
+        else:
+            raise
+
+    print("got deps zip, time to unzip it...")
+    subprocess.call(['unzip', '/tmp/' + deps, '-d', '/tmp/'])
+    sys.path.append('/tmp/GDAL-1.11.3-py2.7-linux-x86_64.egg')
+    subprocess.call(['rm', '/tmp/' + deps])
+
+def lambda_handler(event=None, context=None, callback=None, get_deps=True):
+    print("Printing sys.path at start of handler.")
+    print(sys.path)
+    if event is None:
+        try:
+            with open('event.json') as f:
+                event = json.load(f)
+        except Exception as e:
+            return return_exception(e, event, context)
+    else:
+        print("Event is not None - see it below:")
+    try:
+        print(json.dumps(event))
+        srcKey = urllib.unquote(event['Records'][0]['s3']['object']['key'].replace(r'/\+/g', " "))
+        print("srcKey = " + srcKey + " at line 78")
         # Infer the file type.
-        typeMatch = srcKey.match(r'/\.([^.]*)$/')
-        if !typeMatch:
-            callback("Could not determine the file type.")
-            return
-        fileType = typeMatch[1]
-        if (fileType != "tiff" && fileType != "tif" && fileType != "npz"):
-            callback('Unsupported file type: ' + fileType)
-            return
+        filename, fileType = os.path.splitext(srcKey)
+        if not fileType:
+            if callback:
+                callback("Could not determine the file type.")
+                return
+            else:
+                raise Exception("Uh oh, could not determine file type. srcKey = " + str(srcKey))
+        fileType = fileType.upper()
+        if ("TIFF" not in fileType and "TIF" not in fileType and "NPZ" not in fileType):
+            if callback:
+                callback('Unsupported file type: ' + fileType)
+                return
+            else:
+                raise Exception("Uh oh, unsupported file type. fileType = " + str(fileType))
 
         if 'elev' in srcKey:
             # Do nothing
@@ -91,22 +125,39 @@ def handler(event, context, callback, get_deps=True):
             return
         elif 'tif' in srcKey or 'tiff' in srcKey:
             # This is the case of a raw tiff file being uploaded.
-            s3.download_file(s3_bucket, 'pydem/' + srcKey, '/tmp/' + srcKey) # raw tiff file
+            try:
+                print("Trying to get tif file from s3")
+                s3.Bucket(s3_bucket).download_file(srcKey, '/tmp/' + filename.split('/')[1])
+            except botocore.exceptions.ClientError as e:
+                if e.response['Error']['Code'] == "404":
+                    print("The object does not exist.")
+                else:
+                    raise
+            print("Got tif file from s3, now to getDeps()")
             getDeps()
+            print("Got past getDeps() call")
+            print("Printing new sys.path")
+            print(sys.path)
             from pydem.dem_processing import DEMProcessor
-            demproc = DEMProcessor('/tmp/' + srcKey)
-            demproc.calc_slopes_directions()
+            print("Got past import pydem!")
+
+            # demproc = DEMProcessor('/tmp/' + srcKey)
+            # demproc.calc_slopes_directions()
+
             # TODO Save slope/direction to file and upload to s3, see
             # processing_manager.tile_edge.update_edges(esfile, dem_proc) or
             # save/load array in DEMProcessor
-            demproc.save_elevation('/tmp', raw=True)
-            demproc.save_direction('/tmp', raw=True)
-            demproc.save_slope('/tmp', raw=True)
-            s3.upload_file(s3_bucket, 'pydem/' + )
+
+            # demproc.save_elevation('/tmp', raw=True)
+            # demproc.save_direction('/tmp', raw=True)
+            # demproc.save_slope('/tmp', raw=True)
+
+            s3.upload_file('/tmp/' + filename.split('/')[1], s3_bucket, 'DSullivan/mag.tif')
+            print("Got past upload mag tif file!!!")
+            return
 
 
     except Exception as e:
-        return return_exception(e, event, context, pipeline)
+        return return_exception(e, event, context)
 
-if __name__ == "__main__":
-    # test
+# print(lambda_handler())
