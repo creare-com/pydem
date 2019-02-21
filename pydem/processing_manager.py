@@ -786,7 +786,7 @@ class ProcessManager(object):
         fn_mag = dem_proc.get_full_fn('mag', save_path)
         if (not self.overwrite_cache and
             os.path.exists(fn_ele + '.npz') and
-            os.path.exists(fn_and + '.npz') and
+            os.path.exists(fn_ang + '.npz') and
             os.path.exists(fn_mag + '.npz')):
             dem_proc.load_elevation(fn_ele)
             dem_proc.load_direction(fn_ang)
