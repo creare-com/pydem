@@ -781,7 +781,7 @@ class ProcessManager(object):
             return fn, 'Cached'
 
         # only calculate the slopes and direction if they do not exist in cache
-        fn_ele = dem_proc.get_full_fn('ele', save_path)
+        fn_ele = dem_proc.get_full_fn('elev', save_path)
         fn_ang = dem_proc.get_full_fn('ang', save_path)
         fn_mag = dem_proc.get_full_fn('mag', save_path)
         if (not self.overwrite_cache and

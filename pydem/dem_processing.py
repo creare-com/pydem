@@ -685,7 +685,7 @@ class DEMProcessor(object):
             subprocess.call(cmd, shell=True)
             os.remove(tmp_file)
         else:
-            np.savez_compressed(fnl_file, array)
+            np.savez_compressed(fnl_file, np.array(array))
 
     def save_uca(self, rootpath, raw=False, as_int=False):
         """ Saves the upstream contributing area to a file
@@ -706,7 +706,7 @@ class DEMProcessor(object):
     def save_elevation(self, rootpath, raw=False, as_int=False):
         """ Saves the (interpolated/filled) elevation to a file
         """
-        self.save_array(self.mag, None, 'elev', rootpath, raw, as_int=as_int)
+        self.save_array(self.data, None, 'elev', rootpath, raw, as_int=as_int)
 
     def save_slope(self, rootpath, raw=False, as_int=False):
         """ Saves the magnitude of the slope to a file
@@ -748,7 +748,8 @@ class DEMProcessor(object):
     def load_elevation(self, fn):
         """Loads pre-computed (interpolated/filled) elevation from file
         """
-        self.load_array(fn, 'elev')
+        self.load_array(fn, 'data')
+        self.data = np.ma.array(self.data, mask=np.isnan(self.data))
 
     def load_slope(self, fn):
         """Loads pre-computed slope magnitude from file
@@ -1763,6 +1764,8 @@ class DEMProcessor(object):
         if CYTHON:
             area_ = area.ravel()
             done_ = done.ravel()
+            edge_todo_ = edge_todo.astype('float64').ravel()
+            edge_todo_no_mask_ = edge_todo_no_mask.astype('float64').ravel()
         data_ = data.ravel()
 
         done_ = done.ravel()
@@ -1775,8 +1778,6 @@ class DEMProcessor(object):
             done_sum = done_.sum()
             count += 1
             if CYTHON:
-                edge_todo_ = edge_todo.astype('float64').ravel()
-                edge_todo_no_mask_ = edge_todo_no_mask.astype('float64').ravel()
                 area_, done_, edge_todo_, edge_todo_no_mask_ = cyutils.drain_area(
                     area_, done_, ids,
                     A.indptr, A.indices, A.data, B.indptr, B.indices,
