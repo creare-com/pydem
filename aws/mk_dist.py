@@ -23,14 +23,14 @@ pgz = parse_ps(zps)
 pg = parse_ps(ps)
 
 data = {}
-for p, s in pgz.items():
+for p, s in list(pgz.items()):
     os = pg.get(p[:-4], 0)
     data[p] = {"zip_size": s, "size": os, 'ratio':os*1.0/s}
 
-sdata = sorted(data.items(), key=lambda t: t[1]['ratio'])
+sdata = sorted(list(data.items()), key=lambda t: t[1]['ratio'])
 
 zipsize = data['pydem_dist.zip']['zip_size']
-totsize = sum([pg[k] for k in pg if (k + '.zip') not in pgz.keys()])
+totsize = sum([pg[k] for k in pg if (k + '.zip') not in list(pgz.keys())])
 pkgs = []
 for val in sdata[::-1]:
     if val[0] == 'pydem_dist.zip':

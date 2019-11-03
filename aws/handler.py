@@ -1,4 +1,4 @@
-from __future__ import division, unicode_literals, print_function, absolute_import
+
 
 import json
 import boto3
@@ -6,7 +6,7 @@ import botocore
 import subprocess
 import sys, os
 if sys.version_info.major == 2:
-    import urllib
+    import urllib.request, urllib.parse, urllib.error
 else:
     import urllib.parse as urllib
 if not os.path.isdir('/tmp/'):
@@ -74,7 +74,7 @@ def lambda_handler(event=None, context=None, callback=None, get_deps=True):
         print("Event is not None - see it below:")
     try:
         print(json.dumps(event))
-        srcKey = urllib.unquote(event['Records'][0]['s3']['object']['key'].replace(r'/\+/g', " "))
+        srcKey = urllib.parse.unquote(event['Records'][0]['s3']['object']['key'].replace(r'/\+/g', " "))
         print("srcKey = " + srcKey + " at line 78")
         # Infer the file type.
         filename, fileType = os.path.splitext(srcKey)

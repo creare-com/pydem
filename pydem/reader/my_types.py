@@ -37,7 +37,7 @@ d_name_to_wkt = {'WGS84' : r'GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",
 d_name_to_epsg = {'WGS84' : 4326,
                   'NAD83': 4269
                  }
-d_wkt_to_name = {v:k for k, v in d_name_to_wkt.iteritems()}
+d_wkt_to_name = {v:k for k, v in d_name_to_wkt.items()}
 d_wkt_to_name[r'GEOGCS["NAD83",DATUM["North_American_Datum_1983",SPHEROID["GRS 1980",6378137,298.2572221010002,AUTHORITY["EPSG","7019"]],AUTHORITY["EPSG","6269"]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433],AUTHORITY["EPSG","4269"]]'] = 'NAD83'
 d_wkt_to_name[r'GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563,AUTHORITY["EPSG","7030"]],AUTHORITY["EPSG","6326"]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433],AUTHORITY["EPSG","4326"]]'] = 'WGS84'  # afghanistan dem
 d_wkt_to_name[r'GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS84",6378137,298.2572235604902,AUTHORITY["EPSG","7030"]],AUTHORITY["EPSG","6326"]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433],AUTHORITY["EPSG","4326"]]'] = 'WGS84'
@@ -226,7 +226,7 @@ class GridCoordinates(HasStrictTraits):
         """
 
         unique_str = "_".join(["%.3f" % f for f in self.geotransform] +
-                              ["%d" % d for d in self.x_size, self.y_size]
+                              ["%d" % d for d in (self.x_size, self.y_size)]
                               )
         if self.date is not None:
             unique_str += '_' + str(self.date)
@@ -397,8 +397,8 @@ class AbstractDataLayer(HasStrictTraits):
         if self.is_enumerated:
             if self.enumeration_colors:
                 d = collections.OrderedDict(sorted(self.enumeration_colors.items()))
-                cmap = colors.ListedColormap(d.values())  # + [(0., 0., 0.)])
-                bounds = np.array(d.keys() + [d.keys()[-1] + 1]) - .5
+                cmap = colors.ListedColormap(list(d.values()))  # + [(0., 0., 0.)])
+                bounds = np.array(list(d.keys()) + [list(d.keys())[-1] + 1]) - .5
                 norm = colors.BoundaryNorm(bounds, cmap.N)
                 return cmap, norm
             else:

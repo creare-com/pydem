@@ -26,9 +26,9 @@ import gdal
 import numpy as np
 from scipy.ndimage.filters import gaussian_filter
 
-from taudem import taudem
-from reader.gdal_reader import GdalReader
-from utils import mk_geotiff_obj, mk_dx_dy_from_geotif_layer, get_fn_from_coords
+from .taudem import taudem
+from .reader.gdal_reader import GdalReader
+from .utils import mk_geotiff_obj, mk_dx_dy_from_geotif_layer, get_fn_from_coords
 PLOT_TESTCASES = True
 
 #if PLOT_TESTCASES:
@@ -84,18 +84,18 @@ def make_elev_ang(testnum, NN, raster, angle, uca=None, testdir='testtiff'):
             elev, driver = mk_geotiff_obj(raster, filename['elev'])
             del driver
             del elev
-            print "Created", filename['elev']
+            print("Created", filename['elev'])
             ang, driver = mk_geotiff_obj(angle, filename['ang'])
             del ang
             del driver
-            print "Created", filename['ang']
+            print("Created", filename['ang'])
         if not os.path.exists(filename['uca']) and uca is not None:
             ucaf, driver = mk_geotiff_obj(uca, filename['uca'])
             del ucaf
             del driver
-            print "Created", filename['uca']
+            print("Created", filename['uca'])
         else:
-            print "Already exists or None", filename['uca']
+            print("Already exists or None", filename['uca'])
     finally:
         ucaf = None
         elev = None
@@ -409,11 +409,11 @@ def mk_test_multifile(testnum, NN, testdir, nx_grid=3, ny_grid=4, nx_overlap=16,
             fn = os.path.join(path,
                               get_fn_from_coords((lat[be-1], lon[le], lat[te],
                                                   lon[re-1]), 'elev'))
-            print count, ": [%d:%d, %d:%d]" % (te, be, le, re), \
+            print(count, ": [%d:%d, %d:%d]" % (te, be, le, re), \
                 '(lat, lon) = (%g to %g, %g to %g)' % (lat[te], lat[be-1],
                                                        lon[le], lon[re-1]), \
                 'min,max = (%g to %g, %g to %g)' % (lat.min(), lat.max(),
-                                                    lon.min(), lon.max())
+                                                    lon.min(), lon.max()))
             mk_geotiff_obj(raster[te:be, le:re], fn,
                            bands=1, gdal_data_type=gdal.GDT_Float32,
                            lat=[lat[te], lat[be-1]], lon=[lon[le], lon[re-1]])

@@ -21,7 +21,7 @@ import numpy as np
 import datetime
 
 from traits.api import *
-from my_types import GridCoordinates, InputRasterDataLayer, d_wkt_to_name
+from .my_types import GridCoordinates, InputRasterDataLayer, d_wkt_to_name
 
 # I have to define UTC time myself.
 ZERO = datetime.timedelta(0)

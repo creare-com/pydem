@@ -37,7 +37,7 @@ import os
 import gdal
 import osr
 import re
-from reader.gdal_reader import GdalReader
+from .reader.gdal_reader import GdalReader
 
 import numpy as np
 from scipy.ndimage.filters import minimum_filter
@@ -71,7 +71,7 @@ def rename_files(files, name=None):
         del elev
         fn = os.path.join(os.path.split(fil)[0], fn)
         os.rename(fil, fn)
-        print "Renamed", fil, "to", fn
+        print("Renamed", fil, "to", fn)
 
 
 def parse_fn(fn):
@@ -153,10 +153,10 @@ def mk_dx_dy_from_geotif_layer(geotif):
     dx = geotif.grid_coordinates.x_axis
     dy = geotif.grid_coordinates.y_axis
     dX = np.zeros((dy.shape[0]-1))
-    for j in xrange(len(dX)):
+    for j in range(len(dX)):
         dX[j] = d.measure((dy[j+1], dx[1]), (dy[j+1], dx[0])) * 1000  # km2m
     dY = np.zeros((dy.shape[0]-1))
-    for i in xrange(len(dY)):
+    for i in range(len(dY)):
         dY[i] = d.measure((dy[i], 0), (dy[i+1], 0)) * 1000  # km2m
     return dX, dY
 
@@ -247,7 +247,7 @@ def sortrows(a, i=0, index_out=False, recurse=True):
     if recurse & (len(a[0]) > i + 1):
         for b in np.unique(a[:, i]):
             ids = a[:, i] == b
-            colids = range(i) + range(i+1, len(a[0]))
+            colids = list(range(i)) + list(range(i+1, len(a[0])))
             a[np.ix_(ids, colids)], I2 = sortrows(a[np.ix_(ids, colids)],
                                                   0, True, True)
             I[ids] = I[np.nonzero(ids)[0][I2]]

@@ -70,16 +70,16 @@ import subprocess
 import scipy.sparse as sps
 import scipy.ndimage as spndi
 
-from reader.gdal_reader import GdalReader, InputRasterDataLayer
-from reader.my_types import grid_coords_from_corners, Point
-from taudem import taudem
-from test_pydem import get_test_data, make_file_names
-from utils import (mk_dx_dy_from_geotif_layer, get_fn,
+from .reader.gdal_reader import GdalReader, InputRasterDataLayer
+from .reader.my_types import grid_coords_from_corners, Point
+from .taudem import taudem
+from .test_pydem import get_test_data, make_file_names
+from .utils import (mk_dx_dy_from_geotif_layer, get_fn,
                    make_slice, is_edge, grow_obj, find_centroid, get_distance,
                    get_border_index, get_border_mask, get_adjacent_index)
 
 try:
-    from cyfuncs import cyutils
+    from .cyfuncs import cyutils
     CYTHON = True
 except:
     CYTHON = False
@@ -197,8 +197,8 @@ class TileEdge(object):
         self.percent_done = np.zeros(left.shape, 'float64')
         self.n_todo = np.zeros(left.shape, 'int64')
         max_elev = np.zeros(left.shape, 'float64')
-        for tb in xrange(top_edge.size):
-            for lr in xrange(left_edge.size):
+        for tb in range(top_edge.size):
+            for lr in range(left_edge.size):
                 te = top_edge[tb]
                 be = bottom_edge[tb]
                 le = left_edge[lr]
@@ -307,7 +307,7 @@ class TileEdge(object):
             i += self.n_cols
             found = True
         if not found:
-            print "Side '%s' not found" % neighbor_side
+            print("Side '%s' not found" % neighbor_side)
         # Check if i is in range
         if i < 0 or i >= self.n_chunks:
             return None
@@ -337,7 +337,7 @@ class TileEdge(object):
         right = self.right
         top = self.top
         bottom = self.bottom
-        for i in xrange(self.n_chunks):
+        for i in range(self.n_chunks):
             self.n_todo.ravel()[i] = np.sum([left.ravel()[i].n_todo,
                                             right.ravel()[i].n_todo,
                                             top.ravel()[i].n_todo,
@@ -352,7 +352,7 @@ class TileEdge(object):
         right = self.right
         top = self.top
         bottom = self.bottom
-        for i in xrange(self.n_chunks):
+        for i in range(self.n_chunks):
             self.n_done.ravel()[i] = np.sum([left.ravel()[i].n_done,
                                             right.ravel()[i].n_done,
                                             top.ravel()[i].n_done,
@@ -367,7 +367,7 @@ class TileEdge(object):
         right = self.right
         top = self.top
         bottom = self.bottom
-        for i in xrange(self.n_chunks):
+        for i in range(self.n_chunks):
             self.percent_done.ravel()[i] = \
                 np.sum([left.ravel()[i].percent_done,
                         right.ravel()[i].percent_done,
@@ -385,7 +385,7 @@ class TileEdge(object):
         the edges.
         """
         self.fix_shapes()
-        for i in xrange(self.n_chunks):
+        for i in range(self.n_chunks):
             for side in ['left', 'right', 'top', 'bottom']:
                 edge = getattr(self, side).ravel()[i]
                 if add:
@@ -402,7 +402,7 @@ class TileEdge(object):
         Fixes the shape of the data fields on edges. Left edges should be
         column vectors, and top edges should be row vectors, for example.
         """
-        for i in xrange(self.n_chunks):
+        for i in range(self.n_chunks):
             for side in ['left', 'right', 'top', 'bottom']:
                 edge = getattr(self, side).ravel()[i]
                 if side in ['left', 'right']:
@@ -681,7 +681,7 @@ class DEMProcessor(object):
             else:
                 cmd = "gdalwarp -overwrite -multi -wm 2000 -co BIGTIFF=YES -of GTiff -co compress=lzw -co TILED=YES -wo OPTIMIZE_SIZE=YES -r near -t_srs %s %s %s" \
                     % (self.save_projection, tmp_file, fnl_file)
-            print "<<"*4, cmd, ">>"*4
+            print("<<"*4, cmd, ">>"*4)
             subprocess.call(cmd, shell=True)
             os.remove(tmp_file)
         else:
@@ -737,8 +737,8 @@ class DEMProcessor(object):
             array = np.load(fn + '.npz')
             try:
                 setattr(self, name, array['arr_0'])
-            except Exception, e:
-                print e
+            except Exception as e:
+                print(e)
             finally:
                 array.close()
 
@@ -1021,7 +1021,7 @@ class DEMProcessor(object):
         # Tarboton http://www.neng.usu.edu/cee/faculty/dtarb/96wr03137.pdf
         if self.data.shape[0] <= self.chunk_size_slp_dir and \
                 self.data.shape[1] <= self.chunk_size_slp_dir:
-            print "starting slope/direction calculation"
+            print("starting slope/direction calculation")
             self.mag, self.direction = self._slopes_directions(
                 self.data, self.dX, self.dY, 'tarboton')
             # Find the flat regions. This is mostly simple (look for mag < 0),
@@ -1048,8 +1048,8 @@ class DEMProcessor(object):
             count = 1
             for te, be in zip(top_edge, bottom_edge):
                 for le, re in zip(left_edge, right_edge):
-                    print "starting slope/direction calculation for chunk", \
-                        count, "[%d:%d, %d:%d]" % (te, be, le, re)
+                    print("starting slope/direction calculation for chunk", \
+                        count, "[%d:%d, %d:%d]" % (te, be, le, re))
                     count += 1
                     mag, direction = \
                         self._slopes_directions(self.data[te:be, le:re],
@@ -1183,7 +1183,7 @@ class DEMProcessor(object):
                       'right': [slice(None), slice(-1, None)],
                       'top': [slice(0, 1), slice(None)],
                       'bottom': [slice(-1, None), slice(None)]}
-            for key, val in slices.iteritems():
+            for key, val in slices.items():
                 # To initialize and edge it needs to have data and be finished
                 uca_edge_done[val] += \
                     edge_init_done[key].reshape(uca_edge_init[val].shape)
@@ -1201,7 +1201,7 @@ class DEMProcessor(object):
         if self.data.shape[0] <= self.chunk_size_uca and \
                 self.data.shape[1] <= self.chunk_size_uca:
             if uca_init is None:
-                print "Starting uca calculation"
+                print("Starting uca calculation")
                 res = self._calc_uca_chunk(self.data, self.dX, self.dY,
                                            self.direction, self.mag,
                                            self.flats,
@@ -1211,7 +1211,7 @@ class DEMProcessor(object):
                 self.edge_done = res[2]
                 self.uca = res[0]
             else:
-                print "Starting edge resolution round: ",
+                print("Starting edge resolution round: ", end=' ')
                 # last return value will be None: edge_
                 area, e2doi, edone, _ = \
                     self._calc_uca_chunk_update(self.data, self.dX, self.dY,
@@ -1253,11 +1253,11 @@ class DEMProcessor(object):
             self.data.mask[-1, :] = True
 
             # if 1:  # uca_init == None:
-            print "Starting uca calculation for chunk: ",
+            print("Starting uca calculation for chunk: ", end=' ')
             # %%
             for te, be in zip(top_edge, bottom_edge):
                 for le, re in zip(left_edge, right_edge):
-                    print count, "[%d:%d, %d:%d]" % (te, be, le, re),
+                    print(count, "[%d:%d, %d:%d]" % (te, be, le, re), end=' ')
                     count += 1
                     area, e2doi, edone, e2doi_no_mask, e2o_no_mask = \
                         self._calc_uca_chunk(self.data[te:be, le:re],
@@ -1290,7 +1290,7 @@ class DEMProcessor(object):
                     tile_edge.set_sides((te, be, le, re), e2doi, 'todo',
                                         local=True)
             # %%
-            print '..Done'
+            print('..Done')
             # This needs to be much more sophisticated because we have to
             # follow the tile's edge value through the interior.
             # Since we have to do that anyway, we might as well recompute
@@ -1336,12 +1336,12 @@ class DEMProcessor(object):
             i = tile_edge.find_best_candidate()
             tile_edge.fix_shapes()
 #            dbug = np.zeros_like(self.uca)
-            print "Starting edge resolution round: ",
+            print("Starting edge resolution round: ", end=' ')
             count = 0
             i_old = -1
             while i is not None and i != i_old:
                 count += 1
-                print count, '(%d) .' % i,
+                print(count, '(%d) .' % i, end=' ')
                 # %%
                 te, be, le, re = tile_edge.coords[i]
                 data, dX, dY, direction, mag, flats = \
@@ -1392,7 +1392,7 @@ class DEMProcessor(object):
             self.tile_edge = tile_edge
             self.edge_todo = edge_todo_tile
             self.edge_done = ~edge_not_done_tile
-        print '..Done'
+        print('..Done')
 
         # Fix the very last pixel on the edges
         self.fix_edge_pixels(edge_init_data, edge_init_done, edge_init_todo)
@@ -1551,7 +1551,7 @@ class DEMProcessor(object):
             # references.
             while (ids - ids_old).sum() > 0:
                 # %%
-                print "x",
+                print("x", end=' ')
                 ids_old = ids.copy()
                 ids_todo = ids_i[ids.ravel()]
                 ids[:] = False
@@ -1593,7 +1593,7 @@ class DEMProcessor(object):
             # circular references.
             while (ids - ids_old).sum() > 0:
                 # %%
-                print "o",
+                print("o", end=' ')
                 ids_old = ids.copy()
                 done.ravel()[ids] = True
                 ids_todo = ids_i[ids.ravel()]
@@ -1670,7 +1670,7 @@ class DEMProcessor(object):
             # circular references.
             while (ids - ids_old).sum() > 0:
                 # %%
-                print "x",
+                print("x", end=' ')
                 ids_old = ids.copy()
 #                edge_todo_old = arr.copy()
                 ids_todo = ids_i[ids.ravel()]
@@ -1773,7 +1773,7 @@ class DEMProcessor(object):
         max_elev = -1
         while (np.any(~done_) and count < self.circular_ref_maxcount)\
                 and done_sum != done_.sum():
-            print ".", #done_sum, done_.sum(), max_elev, count,
+            print(".", end=' ') #done_sum, done_.sum(), max_elev, count,
             import sys;sys.stdout.flush()
             done_sum = done_.sum()
             count += 1
@@ -2186,7 +2186,7 @@ class DEMProcessor(object):
         edges = np.zeros_like(flats)
         # %% Calcute the flat drainage
         warn_flats = []
-        for ii in xrange(n_flats):
+        for ii in range(n_flats):
             ids_flats = flat_ids[flat_coords[ii]:flat_coords[ii+1]]
             edges[:] = 0
             j = ids_flats % mm
@@ -2478,7 +2478,7 @@ def _tarboton_slopes_directions(data, dX, dY, facets, ang_adj):
     mag = np.full(data.shape, FLAT_ID_INT, 'float64')
 
     slc0 = [slice(1, -1), slice(1, -1)]
-    for ind in xrange(8):
+    for ind in range(8):
 
         e1 = facets[ind][1]
         e2 = facets[ind][2]
@@ -2625,14 +2625,14 @@ def _get_d1_d2(dX, dY, ind, e1, e2, shp, topbot=None):
     """
     if topbot == None:
         if ind in [0, 3, 4, 7]:
-            d1 = dX[slice((e2[0] + 1) / 2, shp[0] + (e2[0] - 1) / 2)]
-            d2 = dY[slice((e2[0] + 1) / 2, shp[0] + (e2[0] - 1) / 2)]
+            d1 = dX[slice((e2[0] + 1) // 2, shp[0] + (e2[0] - 1) // 2)]
+            d2 = dY[slice((e2[0] + 1) // 2, shp[0] + (e2[0] - 1) // 2)]
             if d1.size == 0:
                 d1 = np.array([dX[0]])
                 d2 = np.array([dY[0]])
         else:
-            d2 = dX[slice((e1[0] + 1) / 2, shp[0] + (e1[0] - 1) / 2)]
-            d1 = dY[slice((e1[0] + 1) / 2, shp[0] + (e1[0] - 1) / 2)]
+            d2 = dX[slice((e1[0] + 1) // 2, shp[0] + (e1[0] - 1) // 2)]
+            d1 = dY[slice((e1[0] + 1) // 2, shp[0] + (e1[0] - 1) // 2)]
             if d1.size == 0:
                 d2 = dX[0]
                 d1 = dY[0]

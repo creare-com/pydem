@@ -24,11 +24,6 @@ from os import path
 import os
 import numpy as np
 
-# Check for python 3
-import sys
-if not sys.version_info[0] == 2:
-    sys.exit("Sorry, Python 3 is not supported.")
-
 from Cython.Build import cythonize
 
 here = os.path.join(path.dirname(__file__), 'pydem')
@@ -90,7 +85,7 @@ setup(
     ],
     packages=find_packages(),
 
-    python_requires='<3',
+    python_requires='>=3',
 
     install_requires=[
         #'gdal',

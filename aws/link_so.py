@@ -8,7 +8,7 @@ for s in sf:
     key = s.split('/')[-1]
     links[key] = links.get(key, []) + [s]
 
-for l,v in links.items():
+for l,v in list(links.items()):
     if len(v) > 1:
         for f in v[1:]:
             os.remove(f)
