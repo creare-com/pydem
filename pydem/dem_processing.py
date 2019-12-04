@@ -707,10 +707,10 @@ class DEMProcessor(object):
         edge_init_done, edge_init_todo = None, None
         if edge_init_data is not None:
             edge_init_data, edge_init_done, edge_init_todo = edge_init_data
-            slices = {'left': [slice(None), slice(0, 1)],
-                      'right': [slice(None), slice(-1, None)],
-                      'top': [slice(0, 1), slice(None)],
-                      'bottom': [slice(-1, None), slice(None)]}
+            slices = {'left': (slice(None), slice(0, 1)),
+                      'right': (slice(None), slice(-1, None)),
+                      'top': (slice(0, 1), slice(None)),
+                      'bottom': (slice(-1, None), slice(None))}
             for key, val in slices.items():
                 # To initialize and edge it needs to have data and be finished
                 uca_edge_done[val] += \
@@ -772,10 +772,10 @@ class DEMProcessor(object):
         data, dX, dY, direction, flats = \
             self.data, self.dX, self.dY, self.direction, self.flats
         sides = ['left', 'right', 'top', 'bottom']
-        slices_o = [[slice(None), slice(1, 2)], [slice(None), slice(-2, -1)],
-                    [slice(1, 2), slice(None)], [slice(-2, -1), slice(None)]]
-        slices_d = [[slice(None), slice(0, 1)], [slice(None), slice(-1, None)],
-                    [slice(0, 1), slice(None)], [slice(-1, None), slice(None)]]
+        slices_o = ((slice(None), slice(1, 2)), (slice(None), slice(-2, -1)),
+                    (slice(1, 2), slice(None)), (slice(-2, -1), slice(None)))
+        slices_d = ((slice(None), slice(0, 1)), (slice(None), slice(-1, None)),
+                    (slice(0, 1), slice(None)), (slice(-1, None), slice(None)))
 
         # The first set of edges will have contributions from two nodes whereas
         # the second set of edges will only have contributinos from one node
@@ -837,8 +837,8 @@ class DEMProcessor(object):
         # %%
 
         sides = ['left', 'right', 'top', 'bottom']
-        slices = [[slice(None), slice(0, 1)], [slice(None), slice(-1, None)],
-                  [slice(0, 1), slice(None)], [slice(-1, None), slice(None)]]
+        slices = ((slice(None), slice(0, 1)), (slice(None), slice(-1, None)),
+                  (slice(0, 1), slice(None)), (slice(-1, None), slice(None)))
         # Figure out which section the drainage goes towards, and what
         # proportion goes to the straight-sided (as opposed to diagonal) node.
 
@@ -1350,7 +1350,7 @@ class DEMProcessor(object):
 
         # Now do the edges
         # left edge
-        slc0 = [slice(1, -1), slice(0, 1)]
+        slc0 = (slice(1, -1), slice(0, 1))
         for ind in [0, 1, 6, 7]:
             e1 = facets[ind][1]
             e2 = facets[ind][2]
@@ -1359,7 +1359,7 @@ class DEMProcessor(object):
             j2[slc0][I] = i12[1 + e2[0]:shp[0] + e2[0], e2[1]][I.ravel()]
 
         # right edge
-        slc0 = [slice(1, -1), slice(-1, None)]
+        slc0 = (slice(1, -1), slice(-1, None))
         for ind in [2, 3, 4, 5]:
             e1 = facets[ind][1]
             e2 = facets[ind][2]
@@ -1370,7 +1370,7 @@ class DEMProcessor(object):
                               shp[1] + e2[1]][I.ravel()]
 
         # top edge
-        slc0 = [slice(0, 1), slice(1, -1)]
+        slc0 = (slice(0, 1), slice(1, -1))
         for ind in [4, 5, 6, 7]:
             e1 = facets[ind][1]
             e2 = facets[ind][2]
@@ -1379,7 +1379,7 @@ class DEMProcessor(object):
             j2[slc0][I] = i12[e2[0], 1 + e2[1]:shp[1] + e2[1]][I.ravel()]
 
         # bottom edge
-        slc0 = [slice(-1, None), slice(1, -1)]
+        slc0 = (slice(-1, None), slice(1, -1))
         for ind in [0, 1, 2, 3]:
             e1 = facets[ind][1]
             e2 = facets[ind][2]
@@ -1390,7 +1390,7 @@ class DEMProcessor(object):
                               1 + e2[1]:shp[1] + e2[1]][I.ravel()]
 
         # top-left corner
-        slc0 = [slice(0, 1), slice(0, 1)]
+        slc0 = (slice(0, 1), slice(0, 1))
         for ind in [6, 7]:
             e1 = facets[ind][1]
             e2 = facets[ind][2]
@@ -1399,7 +1399,7 @@ class DEMProcessor(object):
                 j2[slc0] = i12[e2[0], e2[1]]
 
         # top-right corner
-        slc0 = [slice(0, 1), slice(-1, None)]
+        slc0 = (slice(0, 1), slice(-1, None))
         for ind in [4, 5]:
             e1 = facets[ind][1]
             e2 = facets[ind][2]
@@ -1408,7 +1408,7 @@ class DEMProcessor(object):
                 j2[slc0] = i12[e2[0], shp[1] + e2[1]]
 
         # bottom-left corner
-        slc0 = [slice(-1, None), slice(0, 1)]
+        slc0 = (slice(-1, None), slice(0, 1))
         for ind in [0, 1]:
             e1 = facets[ind][1]
             e2 = facets[ind][2]
@@ -1417,7 +1417,7 @@ class DEMProcessor(object):
                 j2[slc0] = i12[shp[0] + e2[0], e2[1]]
 
         # bottom-right corner
-        slc0 = [slice(-1, None), slice(-1, None)]
+        slc0 = (slice(-1, None), slice(-1, None))
         for ind in [2, 3]:
             e1 = facets[ind][1]
             e2 = facets[ind][2]
@@ -1835,16 +1835,16 @@ def _tarboton_slopes_directions(data, dX, dY, facets, ang_adj):
     direction = np.full(data.shape, FLAT_ID_INT, 'float64')
     mag = np.full(data.shape, FLAT_ID_INT, 'float64')
 
-    slc0 = [slice(1, -1), slice(1, -1)]
+    slc0 = (slice(1, -1), slice(1, -1))
     for ind in range(8):
 
         e1 = facets[ind][1]
         e2 = facets[ind][2]
         ang = ang_adj[ind]
-        slc1 = [slice(1 + e1[0], shp[0] + e1[0]),
-                slice(1 + e1[1], shp[1] + e1[1])]
-        slc2 = [slice(1 + e2[0], shp[0] + e2[0]),
-                slice(1 + e2[1], shp[1] + e2[1])]
+        slc1 = (slice(1 + e1[0], shp[0] + e1[0]),
+                slice(1 + e1[1], shp[1] + e1[1]))
+        slc2 = (slice(1 + e2[0], shp[0] + e2[0]),
+                slice(1 + e2[1], shp[1] + e2[1]))
 
         d1, d2, theta = _get_d1_d2(dX, dY, ind, e1, e2, shp)
         mag, direction = _calc_direction(data, mag, direction, ang, d1, d2,
@@ -1872,100 +1872,100 @@ def _tarboton_slopes_directions(data, dX, dY, facets, ang_adj):
     # look at the downstream angle)
 
     # left edge
-    slc0 = [slice(1, -1), slice(0, 1)]
+    slc0 = (slice(1, -1), slice(0, 1))
     for ind in [0, 1, 6, 7]:
         e1 = facets[ind][1]
         e2 = facets[ind][2]
         ang = ang_adj[ind]
-        slc1 = [slice(1 + e1[0], shp[0] + e1[0]), slice(e1[1], 1 + e1[1])]
-        slc2 = [slice(1 + e2[0], shp[0] + e2[0]), slice(e2[1], 1 + e2[1])]
+        slc1 = (slice(1 + e1[0], shp[0] + e1[0]), slice(e1[1], 1 + e1[1]))
+        slc2 = (slice(1 + e2[0], shp[0] + e2[0]), slice(e2[1], 1 + e2[1]))
         d1, d2, theta = _get_d1_d2(dX, dY, ind, e1, e2, shp)
         mag, direction = _calc_direction(data, mag, direction, ang, d1, d2,
                                          theta, slc0, slc1, slc2)
     # right edge
-    slc0 = [slice(1, -1), slice(-1, None)]
+    slc0 = (slice(1, -1), slice(-1, None))
     for ind in [2, 3, 4, 5]:
         e1 = facets[ind][1]
         e2 = facets[ind][2]
         ang = ang_adj[ind]
-        slc1 = [slice(1 + e1[0], shp[0] + e1[0]),
-                slice(shp[1] + e1[1], shp[1] + 1 + e1[1])]
-        slc2 = [slice(1 + e2[0], shp[0] + e2[0]),
-                slice(shp[1] + e2[1], shp[1] + 1 + e2[1])]
+        slc1 = (slice(1 + e1[0], shp[0] + e1[0]),
+                slice(shp[1] + e1[1], shp[1] + 1 + e1[1]))
+        slc2 = (slice(1 + e2[0], shp[0] + e2[0]),
+                slice(shp[1] + e2[1], shp[1] + 1 + e2[1]))
         d1, d2, theta = _get_d1_d2(dX, dY, ind, e1, e2, shp)
         mag, direction = _calc_direction(data, mag, direction, ang, d1, d2,
                                          theta, slc0, slc1, slc2)
     # top edge
-    slc0 = [slice(0, 1), slice(1, -1)]
+    slc0 = (slice(0, 1), slice(1, -1))
     for ind in [4, 5, 6, 7]:
         e1 = facets[ind][1]
         e2 = facets[ind][2]
         ang = ang_adj[ind]
-        slc1 = [slice(e1[0], 1 + e1[0]), slice(1 + e1[1], shp[1] + e1[1])]
-        slc2 = [slice(e2[0], 1 + e2[0]), slice(1 + e2[1], shp[1] + e2[1])]
+        slc1 = (slice(e1[0], 1 + e1[0]), slice(1 + e1[1], shp[1] + e1[1]))
+        slc2 = (slice(e2[0], 1 + e2[0]), slice(1 + e2[1], shp[1] + e2[1]))
         d1, d2, theta = _get_d1_d2(dX, dY, ind, e1, e2, shp, 'top')
         mag, direction = _calc_direction(data, mag, direction, ang, d1, d2,
                                          theta, slc0, slc1, slc2)
     # bottom edge
-    slc0 = [slice(-1, None), slice(1, -1)]
+    slc0 = (slice(-1, None), slice(1, -1))
     for ind in [0, 1, 2, 3]:
         e1 = facets[ind][1]
         e2 = facets[ind][2]
         ang = ang_adj[ind]
-        slc1 = [slice(shp[0] + e1[0], shp[0] + 1 + e1[0]),
-                slice(1 + e1[1], shp[1] + e1[1])]
-        slc2 = [slice(shp[0] + e2[0], shp[0] + 1 + e2[0]),
-                slice(1 + e2[1], shp[1] + e2[1])]
+        slc1 = (slice(shp[0] + e1[0], shp[0] + 1 + e1[0]),
+                slice(1 + e1[1], shp[1] + e1[1]))
+        slc2 = (slice(shp[0] + e2[0], shp[0] + 1 + e2[0]),
+                slice(1 + e2[1], shp[1] + e2[1]))
         d1, d2, theta = _get_d1_d2(dX, dY, ind, e1, e2, shp, 'bot')
         mag, direction = _calc_direction(data, mag, direction, ang, d1, d2,
                                          theta, slc0, slc1, slc2)
     # top-left corner
-    slc0 = [slice(0, 1), slice(0, 1)]
+    slc0 = (slice(0, 1), slice(0, 1))
     for ind in [6, 7]:
         e1 = facets[ind][1]
         e2 = facets[ind][2]
         ang = ang_adj[ind]
-        slc1 = [slice(e1[0], 1 + e1[0]), slice(e1[1], 1 + e1[1])]
-        slc2 = [slice(e2[0], 1 + e2[0]), slice(e2[1], 1 + e2[1])]
+        slc1 = (slice(e1[0], 1 + e1[0]), slice(e1[1], 1 + e1[1]))
+        slc2 = (slice(e2[0], 1 + e2[0]), slice(e2[1], 1 + e2[1]))
         d1, d2, theta = _get_d1_d2(dX, dY, ind, e1, e2, shp, 'top')
         mag, direction = _calc_direction(data, mag, direction, ang, d1, d2,
                                          theta, slc0, slc1, slc2)
     # top-right corner
-    slc0 = [slice(0, 1), slice(-1, None)]
+    slc0 = (slice(0, 1), slice(-1, None))
     for ind in [4, 5]:
         e1 = facets[ind][1]
         e2 = facets[ind][2]
         ang = ang_adj[ind]
-        slc1 = [slice(e1[0], 1 + e1[0]),
-                slice(shp[1] + e1[1], shp[1] + 1 + e1[1])]
-        slc2 = [slice(e2[0], 1 + e2[0]),
-                slice(shp[1] + e2[1], shp[1] + 1 + e2[1])]
+        slc1 = (slice(e1[0], 1 + e1[0]),
+                slice(shp[1] + e1[1], shp[1] + 1 + e1[1]))
+        slc2 = (slice(e2[0], 1 + e2[0]),
+                slice(shp[1] + e2[1], shp[1] + 1 + e2[1]))
         d1, d2, theta = _get_d1_d2(dX, dY, ind, e1, e2, shp, 'top')
         mag, direction = _calc_direction(data, mag, direction, ang, d1, d2,
                                          theta, slc0, slc1, slc2)
     # bottom-left corner
-    slc0 = [slice(-1, None), slice(0, 1)]
+    slc0 = (slice(-1, None), slice(0, 1))
     for ind in [0, 1]:
         e1 = facets[ind][1]
         e2 = facets[ind][2]
         ang = ang_adj[ind]
-        slc1 = [slice(shp[0] + e1[0], shp[0] + 1 + e1[0]),
-                slice(e1[1], 1 + e1[1])]
-        slc2 = [slice(shp[0] + e2[0], shp[0] + 1 + e2[0]),
-                slice(e2[1], 1 + e2[1])]
+        slc1 = (slice(shp[0] + e1[0], shp[0] + 1 + e1[0]),
+                slice(e1[1], 1 + e1[1]))
+        slc2 = (slice(shp[0] + e2[0], shp[0] + 1 + e2[0]),
+                slice(e2[1], 1 + e2[1]))
         d1, d2, theta = _get_d1_d2(dX, dY, ind, e1, e2, shp, 'bot')
         mag, direction = _calc_direction(data, mag, direction, ang, d1, d2,
                                          theta, slc0, slc1, slc2)
     # bottom-right corner
-    slc0 = [slice(-1, None), slice(-1, None)]
+    slc0 = (slice(-1, None), slice(-1, None))
     for ind in [3, 4]:
         e1 = facets[ind][1]
         e2 = facets[ind][2]
         ang = ang_adj[ind]
-        slc1 = [slice(shp[0] + e1[0], shp[0] + 1 + e1[0]),
-                slice(shp[1] + e1[1], shp[1] + 1 + e1[1])]
-        slc2 = [slice(shp[0] + e2[0], shp[0] + 1 + e2[0]),
-                slice(shp[1] + e2[1], shp[1] + 1 + e2[1])]
+        slc1 = (slice(shp[0] + e1[0], shp[0] + 1 + e1[0]),
+                slice(shp[1] + e1[1], shp[1] + 1 + e1[1]))
+        slc2 = (slice(shp[0] + e2[0], shp[0] + 1 + e2[0]),
+                slice(shp[1] + e2[1], shp[1] + 1 + e2[1]))
         d1, d2, theta = _get_d1_d2(dX, dY, ind, e1, e2, shp, 'bot')
         mag, direction = _calc_direction(data, mag, direction, ang, d1, d2,
                                          theta, slc0, slc1, slc2)
@@ -2015,7 +2015,7 @@ def _calc_direction(data, mag, direction, ang, d1, d2, theta,
                     slc0, slc1, slc2):
     """
     This function gives the magnitude and direction of the slope based on
-    Tarboton's D_\infty method. This is a helper-function to
+    Tarboton's D_\\infty method. This is a helper-function to
     _tarboton_slopes_directions
     """
 
