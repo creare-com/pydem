@@ -25,8 +25,8 @@ takes into account the supplied coordinate system, so it does not make an
 assumption of a rectangular grid for improved accuracy.
 
 It also implements a novel Upstream Contributing Area (UCA) calculation
-algorithm that can operator on chunks of an input file, and accurately handle
-the fluxes at edges of chunks.
+algorithm that can be used on multiple input files, and accurately handle
+the fluxes at edges of files.
 
 Finally, it can calculate the Topographic Wetness Index (TWI) based on the UCA
 and slope magnitude. Flats and no-data areas are in-painted, the maximum
@@ -41,10 +41,6 @@ only need to be concerned with the DEMProcessor class.
 It has only been tested in USGS geotiff files.
 
 It presently only supports WGS84 coordinate systems
-
-Developer Notes
------------------
-The Edge and TileEdge classes keep track of the edge information for tiles
 
 Development Notes
 ------------------
@@ -100,346 +96,6 @@ FLATS_KERNEL2 = np.ones((3, 3), bool)  # Convolution used to find edges to the f
 # nicely with the pit-filling algorithm
 FLATS_KERNEL3 = np.ones((3, 3), bool)  # Kernel used to connect flats and edges
 FILL_VALUE = -9999  # This is the integer fill value for no-data values
-
-
-class Edge(object):
-    """
-    Small helper class that keeps track of data on an edge. It doesn't care
-    if it's a top, bottom, left, or right edge.
-    """
-    todo = None
-    done = None
-    slice = None
-    data = None
-
-    def __init__(self, size, slice_):
-        self.todo = np.ones(size, bool)
-        self.done = np.zeros(size, bool)
-        self.slice = slice_
-        self.data = np.zeros(size, 'float64')
-
-    @property
-    def n_done(self):
-        return (self.coulddo & self.done).sum()
-
-    @property
-    def n_coulddo(self):
-        return self.coulddo.sum()
-
-    @property
-    def percent_done(self):
-        return 1.0 * (self.coulddo & self.done).sum() \
-            / (self.coulddo.sum() + 1e-16)
-
-    @property
-    def coulddo(self):
-        return self.todo & (self.data > 0)
-
-
-class TileEdge(object):
-    """
-    Class that combines 4 edges per tile, and keeps track of all the edges
-    in all the tiles on an image. This is for a single image file.
-    """
-    left = None
-    right = None
-    top = None
-    bottom = None
-    keys = None
-    coords = None
-    n_chunks = None
-    n_cols = None
-    x_axis = None
-    y_axis = None
-    max_elev = None  # Used to figure out which tile first in case of ties
-    n_done = None
-    percent_done = None
-    n_todo = None
-
-    def __init__(self, top_edge, bottom_edge, left_edge, right_edge, overlap,
-                 x_axis, y_axis, elev):
-        """
-        Parameters
-        ----------
-        top_edge : 1d array
-            Array of indices giving the top edge corners
-        bottom_edge : 1d array
-            Array of indices giving the bottom edge corners
-        left_edge : 1d array
-            Array of indices giving the left edge corners
-        right_edge : 1d array
-            Array of indices giving the right edge corners
-        overlap : int
-            The number of pixels that tiles overlab
-        x_axis : 1d array
-            Coordinates of the x-axis
-        y_axis : 1d array
-            Coordinates of the y-axis
-        elev : 2d array
-            The elevation data on the tile
-        Notes
-        ------
-        To create the *_edge arrays,
-        see :py:func:`DEMProcessor._get_chunk_edges`
-        """
-        self.n_chunks = top_edge.size * left_edge.size
-        self.n_cols = left_edge.size
-        self.x_axis = x_axis
-        self.y_axis = y_axis
-        keys = {}
-        coords = []
-        i = 0
-        left = np.empty((left_edge.size, top_edge.size), Edge)
-        right = np.empty((left_edge.size, top_edge.size), Edge)
-        top = np.empty((left_edge.size, top_edge.size), Edge)
-        bottom = np.empty((left_edge.size, top_edge.size), Edge)
-        n_done = np.zeros(left.shape, 'int64')
-        self.percent_done = np.zeros(left.shape, 'float64')
-        self.n_todo = np.zeros(left.shape, 'int64')
-        max_elev = np.zeros(left.shape, 'float64')
-        for tb in range(top_edge.size):
-            for lr in range(left_edge.size):
-                te = top_edge[tb]
-                be = bottom_edge[tb]
-                le = left_edge[lr]
-                re = right_edge[lr]
-                # create the key with the overlaps
-                keys[(te, be, le, re)] = i
-                coords.append([te, be, le, re])
-                # Remove the overlaps
-#                if re != right_edge.max():
-#                    re -= overlap
-#                if le != 0:
-#                    le += overlap
-#                if te != 0:
-#                    te += overlap
-#                if be != bottom_edge.max():
-#                    be -= overlap
-
-                left.ravel()[i] = Edge(be-te, [slice(te, be), slice(le, le+1)])
-                right.ravel()[i] = Edge(be-te, [slice(te, be), slice(re-1, re)])
-                top.ravel()[i] = Edge(re-le, [slice(te, te+1), slice(le, re)])
-                bottom.ravel()[i] = Edge(re-le, [slice(be-1, be), slice(le, re)])
-                max_elev.ravel()[i] = elev[te:be, le:re].max()
-                i += 1
-        self.left = left
-        self.right = right
-        self.top = top
-        self.bottom = bottom
-        self.keys = keys
-        self.coords = coords
-        self.n_done = n_done
-        self.max_elev = max_elev
-
-    def get(self, key, side):
-        """
-        Returns an edge given a particular key
-        Parmeters
-        ----------
-        key : tuple
-            (te, be, le, re) tuple that identifies a tile
-        side : str
-            top, bottom, left, or right, which edge to return
-        """
-        return getattr(self, side).ravel()[self.keys[key]]
-
-    def get_i(self, i, side):
-        """ Returns the i'th tile's 'side' edge """
-        return getattr(self, side).ravel()[i]
-
-    def set(self, key, data, field, side, local=False):
-        edge = self.get(key, side)
-        if local:
-            if side == 'left':
-                dt = data[:, 0:1]
-            elif side == 'right':
-                dt = data[:, -1:]
-            elif side == 'top':
-                dt = data[0:1, :]
-            elif side == 'bottom':
-                dt = data[-1:, :]
-            setattr(edge, field, dt)
-        else:
-            setattr(edge, field, data[edge.slice])
-
-    def set_i(self, i, data, field, side):
-        """ Assigns data on the i'th tile to the data 'field' of the 'side'
-        edge of that tile
-        """
-        edge = self.get_i(i, side)
-        setattr(edge, field, data[edge.slice])
-
-    def set_sides(self, key, data, field, local=False):
-        """
-        Assign data on the 'key' tile to all the edges
-        """
-        for side in ['left', 'right', 'top', 'bottom']:
-            self.set(key, data, field, side, local)
-
-    def set_neighbor_data(self, neighbor_side, data, key, field):
-        """
-        Assign data from the 'key' tile to the edge on the
-        neighboring tile which is on the 'neighbor_side' of the 'key' tile.
-        The data is assigned to the 'field' attribute of the neihboring tile's
-        edge.
-        """
-        i = self.keys[key]
-        found = False
-        sides = []
-        if 'left' in neighbor_side:
-            if i % self.n_cols == 0:
-                return None
-            i -= 1
-            sides.append('right')
-            found = True
-        if 'right' in neighbor_side:
-            if i % self.n_cols == self.n_cols - 1:
-                return None
-            i += 1
-            sides.append('left')
-            found = True
-        if 'top' in neighbor_side:
-            sides.append('bottom')
-            i -= self.n_cols
-            found = True
-        if 'bottom' in neighbor_side:
-            sides.append('top')
-            i += self.n_cols
-            found = True
-        if not found:
-            print("Side '%s' not found" % neighbor_side)
-        # Check if i is in range
-        if i < 0 or i >= self.n_chunks:
-            return None
-        # Otherwise, set the data
-        for side in sides:
-            self.set_i(i, data, field, side)
-
-    def set_all_neighbors_data(self, data, done,  key):
-        """
-        Given they 'key' tile's data, assigns this information to all
-        neighboring tiles
-        """
-        # The order of this for loop is important because the topleft gets
-        # it's data from the left neighbor, which should have already been
-        # updated...
-        for side in ['left', 'right', 'top', 'bottom', 'topleft',
-                     'topright', 'bottomleft', 'bottomright']:
-            self.set_neighbor_data(side, data, key, 'data')
-#            self.set_neighbor_data(side, todo, key, 'todo')
-            self.set_neighbor_data(side, done, key, 'done')
-
-    def fill_n_todo(self):
-        """
-        Calculate and record the number of edge pixels left to do on each tile
-        """
-        left = self.left
-        right = self.right
-        top = self.top
-        bottom = self.bottom
-        for i in range(self.n_chunks):
-            self.n_todo.ravel()[i] = np.sum([left.ravel()[i].n_todo,
-                                            right.ravel()[i].n_todo,
-                                            top.ravel()[i].n_todo,
-                                            bottom.ravel()[i].n_todo])
-
-    def fill_n_done(self):
-        """
-        Calculate and record the number of edge pixels that are done one each
-        tile.
-        """
-        left = self.left
-        right = self.right
-        top = self.top
-        bottom = self.bottom
-        for i in range(self.n_chunks):
-            self.n_done.ravel()[i] = np.sum([left.ravel()[i].n_done,
-                                            right.ravel()[i].n_done,
-                                            top.ravel()[i].n_done,
-                                            bottom.ravel()[i].n_done])
-
-    def fill_percent_done(self):
-        """
-        Calculate the percentage of edge pixels that would be done if the tile
-        was reprocessed. This is done for each tile.
-        """
-        left = self.left
-        right = self.right
-        top = self.top
-        bottom = self.bottom
-        for i in range(self.n_chunks):
-            self.percent_done.ravel()[i] = \
-                np.sum([left.ravel()[i].percent_done,
-                        right.ravel()[i].percent_done,
-                        top.ravel()[i].percent_done,
-                        bottom.ravel()[i].percent_done])
-            self.percent_done.ravel()[i] /= \
-                np.sum([left.ravel()[i].percent_done > 0,
-                        right.ravel()[i].percent_done > 0,
-                        top.ravel()[i].percent_done > 0,
-                        bottom.ravel()[i].percent_done > 0, 1e-16])
-
-    def fill_array(self, array, field, add=False, maximize=False):
-        """
-        Given a full array (for the while image), fill it with the data on
-        the edges.
-        """
-        self.fix_shapes()
-        for i in range(self.n_chunks):
-            for side in ['left', 'right', 'top', 'bottom']:
-                edge = getattr(self, side).ravel()[i]
-                if add:
-                    array[edge.slice] += getattr(edge, field)
-                elif maximize:
-                    array[edge.slice] = np.maximum(array[edge.slice],
-                                                   getattr(edge, field))
-                else:
-                    array[edge.slice] = getattr(edge, field)
-        return array
-
-    def fix_shapes(self):
-        """
-        Fixes the shape of the data fields on edges. Left edges should be
-        column vectors, and top edges should be row vectors, for example.
-        """
-        for i in range(self.n_chunks):
-            for side in ['left', 'right', 'top', 'bottom']:
-                edge = getattr(self, side).ravel()[i]
-                if side in ['left', 'right']:
-                    shp = [edge.todo.size, 1]
-                else:
-                    shp = [1, edge.todo.size]
-                edge.done = edge.done.reshape(shp)
-                edge.data = edge.data.reshape(shp)
-                edge.todo = edge.todo.reshape(shp)
-
-    def find_best_candidate(self):
-        """
-        Determine which tile, when processed, would complete the largest
-        percentage of unresolved edge pixels. This is a heuristic function
-        and does not give the optimal tile.
-        """
-        self.fill_percent_done()
-        i_b = np.argmax(self.percent_done.ravel())
-        if self.percent_done.ravel()[i_b] <= 0:
-            return None
-
-        # check for ties
-        I = self.percent_done.ravel() == self.percent_done.ravel()[i_b]
-        if I.sum() == 1:
-            return i_b
-        else:
-            I2 = np.argmax(self.max_elev.ravel()[I])
-            return I.nonzero()[0][I2]
-#        i_b = self.percent_done.ravel() > self.percent_done.mean()
-#        i = np.argmax(self.max_elev.ravel()[i_b])
-#        I2 = self.max_elev.ravel()[i_b] == self.max_elev.ravel()[i_b][i]
-#        if I2.sum() == 1:
-#            return i_b.nonzero()[0][i]
-#        else: #tie-break is highest percent done
-#            i2 = np.nonzero(I2)[0]
-#            i3 = np.argmax(self.percent_done.ravel()[i_b][i2])
-#            return i_b.nonzero()[0][i2][i3]
 
 
 class DEMProcessor(object):
@@ -504,11 +160,6 @@ class DEMProcessor(object):
     uca_saturation_limit = 32  # units of area
     twi_min_slope = 1e-3  # Used for TWI max limiting
     twi_min_area = np.inf  # Finds min area in tile
-    chunk_size_slp_dir = 5000 # Size of chunk (without overlaps)
-    # This has to be > 1 to avoid edge effects for flats
-    chunk_overlap_slp_dir = 4  # Overlap when calculating magnitude/directions
-    chunk_size_uca = 5000 # Size of chunks when calculating UCA
-    chunk_overlap_uca = 32  # Number of overlapping pixels for UCA calculation
     # Mostly deprecated, but maximum number of iterations used to try and
     # resolve circular drainage patterns (which should never occur)
     circular_ref_maxcount = 50
@@ -766,92 +417,6 @@ class DEMProcessor(object):
         """
         self.load_array(fn, 'uca')
 
-    def _get_chunk_edges(self, NN, chunk_size, chunk_overlap):
-        """
-        Given the size of the array, calculate and array that gives the
-        edges of chunks of nominal size, with specified overlap
-        Parameters
-        ----------
-        NN : int
-            Size of array
-        chunk_size : int
-            Nominal size of chunks (chunk_size < NN)
-        chunk_overlap : int
-            Number of pixels chunks will overlap
-        Returns
-        -------
-        start_id : array
-            The starting id of a chunk. start_id[i] gives the starting id of
-            the i'th chunk
-        end_id : array
-            The ending id of a chunk. end_id[i] gives the ending id of
-            the i'th chunk
-        """
-        left_edge = np.arange(0, NN - chunk_overlap, chunk_size)
-        left_edge[1:] -= chunk_overlap
-        right_edge = np.arange(0, NN - chunk_overlap, chunk_size)
-        right_edge[:-1] = right_edge[1:] + chunk_overlap
-        right_edge[-1] = NN
-        right_edge = np.minimum(right_edge, NN)
-        return left_edge, right_edge
-
-    def _assign_chunk(self, data, arr1, arr2, te, be, le, re, ovr, add=False):
-        """
-        Assign data from a chunk to the full array. The data in overlap regions
-        will not be assigned to the full array
-
-        Parameters
-        -----------
-        data : array
-            Unused array (except for shape) that has size of full tile
-        arr1 : array
-            Full size array to which data will be assigned
-        arr2 : array
-            Chunk-sized array from which data will be assigned
-        te : int
-            Top edge id
-        be : int
-            Bottom edge id
-        le : int
-            Left edge id
-        re : int
-            Right edge id
-        ovr : int
-            The number of pixels in the overlap
-        add : bool, optional
-            Default False. If true, the data in arr2 will be added to arr1,
-            otherwise data in arr2 will overwrite data in arr1
-        """
-
-        if te == 0:
-            i1 = 0
-        else:
-            i1 = ovr
-
-        if be == data.shape[0]:
-            i2 = 0
-            i2b = None
-        else:
-            i2 = -ovr
-            i2b = -ovr
-
-        if le == 0:
-            j1 = 0
-        else:
-            j1 = ovr
-
-        if re == data.shape[1]:
-            j2 = 0
-            j2b = None
-        else:
-            j2 = -ovr
-            j2b = -ovr
-
-        if add:
-            arr1[te+i1:be+i2, le+j1:re+j2] += arr2[i1:i2b, j1:j2b]
-        else:
-            arr1[te+i1:be+i2, le+j1:re+j2] = arr2[i1:i2b, j1:j2b]
-
     def find_flats(self):
         self.flats = self.mag == FLAT_ID_INT
 
@@ -1019,54 +584,17 @@ class DEMProcessor(object):
 
         # %% Calculate the slopes and directions based on the 8 sections from
         # Tarboton http://www.neng.usu.edu/cee/faculty/dtarb/96wr03137.pdf
-        if self.data.shape[0] <= self.chunk_size_slp_dir and \
-                self.data.shape[1] <= self.chunk_size_slp_dir:
-            print("starting slope/direction calculation")
-            self.mag, self.direction = self._slopes_directions(
+        print("starting slope/direction calculation")
+        self.mag, self.direction = self._slopes_directions(
                 self.data, self.dX, self.dY, 'tarboton')
-            # Find the flat regions. This is mostly simple (look for mag < 0),
-            # but the downstream pixel at the edge of a flat will have a
-            # calcuable angle which will not be accurate. We have to also find
-            # these edges and set their magnitude to -1 (that is, the flat_id)
-            flats = self._find_flats_edges(self.data, self.mag, self.direction)
-            self.direction[flats] = FLAT_ID_INT
-            self.mag[flats] = FLAT_ID_INT
-            self.flats = flats
-        else:
-            self.direction = np.full(self.data.shape, FLAT_ID_INT, 'float64')
-            self.mag = np.full(self.data.shape, FLAT_ID_INT, 'float64')
-            self.flats = np.zeros(self.data.shape, bool)
-            top_edge, bottom_edge = \
-                self._get_chunk_edges(self.data.shape[0],
-                                      self.chunk_size_slp_dir,
-                                      self.chunk_overlap_slp_dir)
-            left_edge, right_edge = \
-                self._get_chunk_edges(self.data.shape[1],
-                                      self.chunk_size_slp_dir,
-                                      self.chunk_overlap_slp_dir)
-            ovr = self.chunk_overlap_slp_dir
-            count = 1
-            for te, be in zip(top_edge, bottom_edge):
-                for le, re in zip(left_edge, right_edge):
-                    print("starting slope/direction calculation for chunk", \
-                        count, "[%d:%d, %d:%d]" % (te, be, le, re))
-                    count += 1
-                    mag, direction = \
-                        self._slopes_directions(self.data[te:be, le:re],
-                                                self.dX[te:be-1],
-                                                self.dY[te:be-1])
-
-                    flats = self._find_flats_edges(self.data[te:be, le:re],
-                                                   mag, direction)
-
-                    direction[flats] = FLAT_ID_INT
-                    mag[flats] = FLAT_ID_INT
-                    self._assign_chunk(self.data, self.mag, mag,
-                                       te, be, le, re, ovr)
-                    self._assign_chunk(self.data, self.direction, direction,
-                                       te, be, le, re, ovr)
-                    self._assign_chunk(self.data, self.flats, flats,
-                                       te, be, le, re, ovr)
+        # Find the flat regions. This is mostly simple (look for mag < 0),
+        # but the downstream pixel at the edge of a flat will have a
+        # calcuable angle which will not be accurate. We have to also find
+        # these edges and set their magnitude to -1 (that is, the flat_id)
+        flats = self._find_flats_edges(self.data, self.mag, self.direction)
+        self.direction[flats] = FLAT_ID_INT
+        self.mag[flats] = FLAT_ID_INT
+        self.flats = flats
 
         if plotflag:
             self._plot_debug_slopes_directions()
@@ -1198,200 +726,30 @@ class DEMProcessor(object):
         else:
             self.uca = uca_init.astype('float64')
 
-        if self.data.shape[0] <= self.chunk_size_uca and \
-                self.data.shape[1] <= self.chunk_size_uca:
-            if uca_init is None:
-                print("Starting uca calculation")
-                res = self._calc_uca_chunk(self.data, self.dX, self.dY,
-                                           self.direction, self.mag,
-                                           self.flats,
-                                           area_edges=uca_edge_init,
-                                           plotflag=plotflag)
-                self.edge_todo = res[1]
-                self.edge_done = res[2]
-                self.uca = res[0]
-            else:
-                print("Starting edge resolution round: ", end=' ')
-                # last return value will be None: edge_
-                area, e2doi, edone, _ = \
-                    self._calc_uca_chunk_update(self.data, self.dX, self.dY,
-                                                self.direction, self.mag,
-                                                self.flats,
-                                                area_edges=uca_edge_init,
-                                                edge_todo=uca_edge_todo,
-                                                edge_done=uca_edge_done)
-                self.uca += area
-                self.edge_todo = e2doi
-                self.edge_done = edone
-
+        if uca_init is None:
+            print("Starting uca calculation")
+            res = self._calc_uca_chunk(self.data, self.dX, self.dY,
+                                       self.direction, self.mag,
+                                       self.flats,
+                                       area_edges=uca_edge_init,
+                                       plotflag=plotflag)
+            self.edge_todo = res[1]
+            self.edge_done = res[2]
+            self.uca = res[0]
         else:
-            top_edge, bottom_edge = \
-                self._get_chunk_edges(self.data.shape[0], self.chunk_size_uca,
-                                      self.chunk_overlap_uca)
-            left_edge, right_edge = \
-                self._get_chunk_edges(self.data.shape[1], self.chunk_size_uca,
-                                      self.chunk_overlap_uca)
-            ovr = self.chunk_overlap_uca
-
-            # Initialize the edge_todo and done arrays
-            edge_todo = np.zeros(self.data.shape, bool)
-            edge_todo_tile = np.zeros(self.data.shape, bool)
-            edge_not_done_tile = np.zeros(self.data.shape, bool)
-            edge_done = np.zeros(self.data.shape, bool)
-
-            tile_edge = TileEdge(top_edge, bottom_edge, left_edge,
-                                 right_edge, ovr,
-                                 self.elev.grid_coordinates.x_axis,
-                                 self.elev.grid_coordinates.y_axis, self.data)
-            count = 1
-
-            # Mask out the edges because we're just trying to resolve the
-            # internal edge conflicts
-            self.data.mask[:, 0] = True
-            self.data.mask[:, -1] = True
-            self.data.mask[0, :] = True
-            self.data.mask[-1, :] = True
-
-            # if 1:  # uca_init == None:
-            print("Starting uca calculation for chunk: ", end=' ')
-            # %%
-            for te, be in zip(top_edge, bottom_edge):
-                for le, re in zip(left_edge, right_edge):
-                    print(count, "[%d:%d, %d:%d]" % (te, be, le, re), end=' ')
-                    count += 1
-                    area, e2doi, edone, e2doi_no_mask, e2o_no_mask = \
-                        self._calc_uca_chunk(self.data[te:be, le:re],
-                                             self.dX[te:be-1],
-                                             self.dY[te:be-1],
-                                             self.direction[te:be, le:re],
-                                             self.mag[te:be, le:re],
-                                             self.flats[te:be, le:re],
-                                             area_edges=uca_edge_init[te:be, le:re],
-                                             plotflag=plotflag,
-                                             edge_todo_i_no_mask=uca_edge_todo[te:be, le:re])
-                    self._assign_chunk(self.data, self.uca, area,
-                                       te, be, le, re, ovr)
-                    edge_todo[te:be, le:re] += e2doi
-                    edge_not_done_tile[te:be, le:re] += e2o_no_mask
-                    # if this tile is on the edge of the domain, we actually
-                    # want to keep the edge information
-                    # UPDATE: I don't think we actually need this here as it
-                    # will be handled by chunk update ???
-                    self._assign_chunk(self.data, edge_todo_tile, e2doi_no_mask,
-                                       te, be, le, re, ovr)
-#                    if te == top_edge[0] or be == bottom_edge[-1] \
-#                            or le == left_edge[0] or re == right_edge[-1]:
-#                        edge_todo_tile[te:be, le:re] = e2doi
-                    self._assign_chunk(self.data, edge_done, edone,
-                                       te, be, le, re, ovr)
-                    tile_edge.set_all_neighbors_data(self.uca,
-                                                     edge_done,
-                                                     (te, be, le, re))
-                    tile_edge.set_sides((te, be, le, re), e2doi, 'todo',
-                                        local=True)
-            # %%
-            print('..Done')
-            # This needs to be much more sophisticated because we have to
-            # follow the tile's edge value through the interior.
-            # Since we have to do that anyway, we might as well recompute
-            # the UCA from scratch. So the above branch does that. The branch
-            # below would be more efficient if we can get it working.
-            if 0:  # else:
-                # need to populate tile_edge somehow
-                edge_todo_tile = uca_edge_todo & ~uca_edge_done
-                edge_not_done_tile = edge_todo_tile.copy()
-                for te, be in zip(top_edge, bottom_edge):
-                    for le, re in zip(
-                            [left_edge[0], left_edge[-1]],
-                            [right_edge[0], right_edge[-1]]):
-                        e2doi = uca_edge_todo[te:be, le:re]
-                        tiledata = uca_edge_init[te:be, le:re]
-                        tile_edge.set_sides((te, be, le, re), tiledata, 'data',
-                                            local=True)
-                        tiledone = uca_edge_done[te:be, le:re]
-                        tile_edge.set_sides((te, be, le, re), tiledone, 'done',
-                                            local=True)
-                for te, be in zip([top_edge[0], top_edge[-1]],
-                                  [bottom_edge[0], bottom_edge[-1]]):
-                    for le, re in zip(left_edge, right_edge):
-                        e2doi = uca_edge_todo[te:be, le:re]
-                        tiledata = uca_edge_init[te:be, le:re]
-                        tile_edge.set_sides((te, be, le, re), tiledata, 'data',
-                                            local=True)
-                        tiledone = uca_edge_done[te:be, le:re]
-                        tile_edge.set_sides((te, be, le, re), tiledone, 'done',
-                                            local=True)
-
-            if not self.resolve_edges:
-                # This branch is probably horribly broken (but it might have
-                # always been that way)
-                self.tile_edge = tile_edge
-                self.edge_todo = edge_todo
-                self.edge_done = edge_done
-                return self.uca
-
-            # ## RESOLVING EDGES ## #
-
-            # Get a good starting tile for the iteration
-            i = tile_edge.find_best_candidate()
-            tile_edge.fix_shapes()
-#            dbug = np.zeros_like(self.uca)
             print("Starting edge resolution round: ", end=' ')
-            count = 0
-            i_old = -1
-            while i is not None and i != i_old:
-                count += 1
-                print(count, '(%d) .' % i, end=' ')
-                # %%
-                te, be, le, re = tile_edge.coords[i]
-                data, dX, dY, direction, mag, flats = \
-                    [self.data[te:be, le:re],
-                     self.dX[te:be-1], self.dY[te:be-1],
-                     self.direction[te:be, le:re],
-                     self.mag[te:be, le:re], self.flats[te:be, le:re]]
-                area, e2doi, edone, e2doi_tile = self._calc_uca_chunk_update(
-                    data, dX, dY, direction, mag, flats, tile_edge, i,
-                    edge_todo=edge_not_done_tile[te:be, le:re])
-                self._assign_chunk(self.data, self.uca, area,
-                                   te, be, le, re, ovr, add=True)
-                self._assign_chunk(self.data, edge_done, edone,
-                                   te, be, le, re, ovr)
-                tile_edge.set_all_neighbors_data(self.uca,
-                                                 edge_done, (te, be, le, re))
+            # last return value will be None: edge_
+            area, e2doi, edone, _ = \
+                self._calc_uca_chunk_update(self.data, self.dX, self.dY,
+                                            self.direction, self.mag,
+                                            self.flats,
+                                            area_edges=uca_edge_init,
+                                            edge_todo=uca_edge_todo,
+                                            edge_done=uca_edge_done)
+            self.uca += area
+            self.edge_todo = e2doi
+            self.edge_done = edone
 
-                try:
-                    edge_not_done_tile[te:be, le:re] += e2doi_tile
-                except:
-                    import ipdb; ipdb.set_trace() # BREAKPOINT
-                tile_edge.set_sides((te, be, le, re), e2doi, 'todo',
-                                    local=True)
-                i_old = i
-                i = tile_edge.find_best_candidate()
-                # Debugging plots below. Feel free to uncomment for debugging
-#                def drawgrid():
-#                    ax = gca();
-#                    ax.set_xticks(np.linspace(-0.5, 63.5, 9))
-#                    ax.set_yticks(np.linspace(-0.5, 63.5, 9))
-#                    grid(lw=2, ls='-', c=(0.5, 0.5, 0.5))
-#                figure(1);clf();imshow((self.uca), interpolation='none');colorbar(); title("uca" + str(i_old) + " " + str(i));drawgrid()
-#                figure(2);clf();imshow(area, interpolation='none');colorbar(); title("local area" + str(i_old) + " " + str(i))
-##                edge_todo[:] = 0
-##                edge_todo = tile_edge.fill_array(edge_todo, 'todo', add=True)
-#                figure(3);clf();imshow(edge_todo*1.0 + edge_done*2.0, interpolation='none');colorbar(); title("todo" + str(i_old) + " " + str(i));clim(0, 3)
-#                edge_todo[:] = 0
-#                edge_todo = tile_edge.fill_array(edge_todo, 'coulddo', add=True)
-#                figure(3);clf();imshow(edge_todo*1.0 + edge_done*2.0, interpolation='none');colorbar(); title("todo" + str(i_old) + " " + str(i));clim(0, 3);drawgrid()
-#                figure(4);clf();imshow(tile_edge.percent_done, interpolation='none');colorbar(); title("percent done" + str(i_old) + " " + str(i));clim(0, 1)
-#                dbug[:] = 0
-#                dbug = tile_edge.fill_array(dbug, 'coulddo', maximize=False)
-#                dbug[dbug > 0] -= (self.uca - ref_area)[dbug > 0]
-#                figure(5);clf();imshow(dbug, interpolation='none');colorbar(); title("data diff" + str(i_old) + " " + str(i));drawgrid()
-#                dbug = (self.uca - area1)
-#                figure(6);clf();imshow(np.log10(np.abs(dbug)), interpolation='none');colorbar(); title("uca diff" + str(i_old) + " " + str(i));drawgrid()
-                # %%
-            self.tile_edge = tile_edge
-            self.edge_todo = edge_todo_tile
-            self.edge_done = ~edge_not_done_tile
         print('..Done')
 
         # Fix the very last pixel on the edges
