@@ -26,7 +26,7 @@ class TestEndtoEnd(object):
        [0.04, 0.04, 0.04, 0.04, 0.04]])
 
     def test_simple_slope(self):
-        dp = DEMProcessor(self.elev)
+        dp = DEMProcessor(elev=self.elev)
         mag, ang = dp.calc_slopes_directions()
         np.testing.assert_array_almost_equal(mag, self.mag)
         np.testing.assert_array_almost_equal(ang, self.ang)

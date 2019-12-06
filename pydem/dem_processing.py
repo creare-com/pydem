@@ -63,11 +63,11 @@ import numpy as np
 
 import os
 import subprocess
+import traitlets as tl
+import traittypes as tt
 import scipy.sparse as sps
 import scipy.ndimage as spndi
 
-from .reader.gdal_reader import GdalReader, InputRasterDataLayer
-from .reader.my_types import grid_coords_from_corners, Point
 from .taudem import taudem
 from .test_pydem import get_test_data, make_file_names
 from .utils import (mk_dx_dy_from_geotif_layer, get_fn,
@@ -98,7 +98,7 @@ FLATS_KERNEL3 = np.ones((3, 3), bool)  # Kernel used to connect flats and edges
 FILL_VALUE = -9999  # This is the integer fill value for no-data values
 
 
-class DEMProcessor(object):
+class DEMProcessor(tl.HasTraits):
     """
     This class processes elevation data, and returns the magnitude of slopes,
     the direction of slopes, the upstream contributing area, and the
@@ -106,70 +106,77 @@ class DEMProcessor(object):
 
     """
     # Flag that when true will ensure edge UCA is continuous across chunks
-    resolve_edges = True
+    resolve_edges = tl.Bool(True)
 #    apply_uca_limit_edges = True
 #    apply_twi_limits = True
 #    apply_twi_limits_on_uca = True
 
-    fill_flats = True
-    fill_flats_below_sea = False
-    fill_flats_source_tol = 1
-    fill_flats_peaks = True
-    fill_flats_pits = True
-    fill_flats_max_iter = 10
+    fill_flats = tl.Bool(True)
+    fill_flats_below_sea = tl.Bool(False)
+    fill_flats_source_tol = tl.Int(1)
+    fill_flats_peaks = tl.Bool(True)
+    fill_flats_pits = tl.Bool(True)
+    fill_flats_max_iter = tl.Int(10)
 
-    drain_pits = True
-    drain_flats = False # will be ignored if drain_pits is True
-    drain_pits_max_iter = 100
-    drain_pits_max_dist = 20 # coordinate space
-    drain_pits_max_dist_XY = None # real space
+    drain_pits = tl.Bool(True)
+    drain_flats = tl.Bool(False) # will be ignored if drain_pits is True
+    drain_pits_max_iter = tl.Int(100)
+    drain_pits_max_dist = tl.Int(20) # coordinate space
+    drain_pits_max_dist_XY = tl.Float(None, allow_none=True) # real space
 
     # When resolving drainage across edges, if maximum UCA is reached, should
     # edge be marked as completed?
-    apply_uca_limit_edges = False
+    apply_uca_limit_edges = tl.Bool(False)
     # When calculating TWI, should TWI be limited to max value?
-    apply_twi_limits = False
+    apply_twi_limits = tl.Bool(False)
     # When calculating TWI, should UCA be limited to max value?
-    apply_twi_limits_on_uca = False
+    apply_twi_limits_on_uca = tl.Bool(False)
 
-    save_projection = 'EPSG:4326'
+    save_projection = tl.Unicode('EPSG:4326')
 
-    direction = None  # Direction of slope in radians
-    mag = None  # magnitude of slopes m/m
-    uca = None  # upstream contributing area
-    twi = None  # topographic wetness index
-    elev = None  # elevation data
+    direction = tt.Array(None, allow_none=True)  # Direction of slope in radians
+    mag = tt.Array(None, allow_none=True)  # magnitude of slopes m/m
+    uca = tt.Array(None, allow_none=True)  # upstream contributing area
+    twi = tt.Array(None, allow_none=True)  # topographic wetness index
+    elev = tt.Array(None, allow_none=True)  # elevation data
     A = None  # connectivity matrix
 
     # Gives the quadrant used for determining the d_infty mag/direction
     section = None  # save for debugging purposes, not useful output otherwise
     # Give the proportion of the area to drain to the first pixel in quadrant
     proportion = None  # Also saved for debugging
-    done = None  # Marks if edges are done
+    done = tl.Instance(np.ndarray, None)  # Marks if edges are done
 
-    plotflag = False  # Debug plots
+    plotflag = tl.Bool(False)  # Debug plots
     # Use uniform values for dx/dy or obtain from geotiff
-    dx_dy_from_file = True
-    file_name = None  # Elevation data filename
+    dx_dy_from_file = tl.Bool(True)
 
-    dX = None  # delta x
-    dY = None  # delta y
+    dX = tl.Instance(np.ndarray, None, allow_none=True)  # delta x
+    dY = tl.Instance(np.ndarray, None, allow_none=True)  # delta y
 
-    flats = None  # Boolean array indicating location of flats
+    @tl.default('dX')
+    def _default_dX(self):
+        return np.ones(self.elev.shape[0] - 1) / self.elev.shape[1]  # dX only changes in latitude
 
-    uca_saturation_limit = 32  # units of area
-    twi_min_slope = 1e-3  # Used for TWI max limiting
-    twi_min_area = np.inf  # Finds min area in tile
+    @tl.default('dY')
+    def _default_dY(self):
+        return np.ones(self.elev.shape[0] - 1) / self.elev.shape[0]  
+
+    flats = tl.Instance(np.ndarray, None)  # Boolean array indicating location of flats
+
+    uca_saturation_limit = tl.Float(32)  # units of area
+    twi_min_slope = tl.Float(1e-3)  # Used for TWI max limiting
+    twi_min_area = tl.Float(np.inf)  # Finds min area in tile
     # Mostly deprecated, but maximum number of iterations used to try and
     # resolve circular drainage patterns (which should never occur)
-    circular_ref_maxcount = 50
+    circular_ref_maxcount = tl.Int(50)
     # Default maximum surface area of pit artifacts resulting from quantization
     # that will be filled
-    maximum_pit_area = 32
+    maximum_pit_area = tl.Float(32)
 
     # The pixel coordinates for the different facets used to calculate the
     # D_infty magnitude and direction (from Tarboton)
-    facets = [
+    facets = tl.List([
              [(0, 0), (0, 1), (-1, 1)],
              [(0, 0), (-1, 0), (-1, 1)],
              [(0, 0), (-1, 0), (-1, -1)],
@@ -178,9 +185,9 @@ class DEMProcessor(object):
              [(0, 0), (1, 0), (1, -1)],
              [(0, 0), (1, 0), (1, 1)],
              [(0, 0), (0, 1), (1, 1)],
-    ]
+    ])
     # Helper for magnitude/direction calculation (modified from Tarboton)
-    ang_adj = np.array([
+    ang_adj = tt.Array([
                        [0, 1],
                        [1, -1],
                        [1, 1],
@@ -190,92 +197,6 @@ class DEMProcessor(object):
                        [3, 1],
                        [4, -1]
                        ])
-
-#    def __del__(self):
-#        self.elev_file = None #Close the elevation file
-
-    def __init__(self, file_name, dx_dy_from_file=True, plotflag=False):
-        """
-        Parameters
-        -----------
-        file_name : str, np.ndarray, tuple
-            If isinstance(str): filename of of elevation data
-            If isinstance(np.ndarray): a numpy array containing elevation data
-            If isinstance(tuple): (elev, lat, lon), three numpy arrays containing
-                elevation data, the latitude (rows), and longitude (columns) of the array.
-                Note: only the max and min values of the latitude and longitude inputs are used.
-                       and a square N-S E-W aligned array is assumed.
-        dx_dy_from_file : bool, optional
-            Default True. If true, will extract coordinates from geotiff file
-            and use those to calculate the magnitude/direction of slopes.
-            Otherwise assumes rectangular (uniform) coordinates. This flag is not
-            used if file_name is not a string.
-        plotflag : bool, optional
-            Default False: If True, will plot debug image. For a large
-            file this is not advised.
-        """
-        # %%
-        if isinstance(file_name, str) and os.path.exists(file_name):
-            elev_file = GdalReader(file_name=file_name)
-            elev, = elev_file.raster_layers
-            data = elev.raster_data
-
-            self.elev = elev
-            self.data = data
-            try:  # if masked array
-                self.data.mask[(np.isnan(self.data))
-                               | (self.data < -9998)] = True
-                self.data[data.mask] = FILL_VALUE
-            except:
-                self.data = np.ma.masked_array(self.data,
-                                               mask=(np.isnan(self.data))
-                                               | (self.data < -9998))
-            del elev_file  # close the file
-            self.file_name = file_name
-        elif isinstance(file_name, np.ndarray): #elevation data given directly
-            self.data = file_name
-            dX = np.ones(self.data.shape[0] - 1) / self.data.shape[1]  #dX only changes in latitude
-            dY = np.ones(self.data.shape[0] - 1) / self.data.shape[0]
-            # Need to spoof elev
-            elev = InputRasterDataLayer()
-            ulc = Point(lat=1, lon=0)
-            lrc = Point(lat=0, lon=1)
-            elev.grid_coordinates = grid_coords_from_corners(ulc, lrc, self.data.shape)
-            self.elev = elev
-        elif isinstance(file_name, tuple): #elevation data given directly
-            self.data, lat, lon = file_name
-            # Need to spoof elev
-            elev = InputRasterDataLayer()
-            ulc = Point(lat=np.nanmax(lat), lon=np.nanmin(lon))
-            lrc = Point(lat=np.nanmin(lat), lon=np.nanmax(lon))
-            elev.grid_coordinates = grid_coords_from_corners(ulc, lrc, self.data.shape)
-            dX, dY = mk_dx_dy_from_geotif_layer(elev)
-            self.elev = elev
-
-        shp = np.array(self.data.shape) - 1
-        if isinstance(file_name, str) and dx_dy_from_file == 'test':  # This is a hidden option for dev/test
-            # dX = np.linspace(0.9, 1.1, data.shape[0] - 1)
-            dY = np.linspace(0.9, 0.9, data.shape[0] - 1)
-            dX = np.ones((data.shape[0] - 1), 'float64') / TEST_DIV
-        elif isinstance(file_name, str) and dx_dy_from_file:
-            dX, dY = mk_dx_dy_from_geotif_layer(elev)
-
-            if plotflag:
-                from matplotlib.pyplot import plot, gca
-                x = np.dot(np.arange(1, 10)[:, None], dX[None, :])
-                y = np.dot(np.arange(1, 10)[:, None], dY[None, :])
-                plot(x.ravel(), y.ravel(), '.')
-                gca().invert_yaxis()
-        elif isinstance(file_name, str):
-            dX = np.ones((data.shape[0]-1), 'float64') / (shp[1])
-            dY = np.ones((data.shape[0]-1), 'float64') / (shp[0])
-        if dx_dy_from_file == 'hack':
-            dx = np.mean([dX.mean(), dY.mean()])
-            dX[:] = dx
-            dY[:] = dx
-
-        self.dX = dX
-        self.dY = dY
 
     def get_fn(self, name=None):
         return get_fn(self.elev, name)
@@ -357,7 +278,7 @@ class DEMProcessor(object):
     def save_elevation(self, rootpath, raw=False, as_int=False):
         """ Saves the (interpolated/filled) elevation to a file
         """
-        self.save_array(self.data, None, 'elev', rootpath, raw, as_int=as_int)
+        self.save_array(self.elev, None, 'elev', rootpath, raw, as_int=as_int)
 
     def save_slope(self, rootpath, raw=False, as_int=False):
         """ Saves the magnitude of the slope to a file
@@ -400,7 +321,7 @@ class DEMProcessor(object):
         """Loads pre-computed (interpolated/filled) elevation from file
         """
         self.load_array(fn, 'data')
-        self.data = np.ma.array(self.data, mask=np.isnan(self.data))
+        self.elev = np.ma.array(self.elev, mask=np.isnan(self.elev))
 
     def load_slope(self, fn):
         """Loads pre-computed slope magnitude from file
@@ -514,31 +435,31 @@ class DEMProcessor(object):
         quantization.
         """
 
-        self.filledPits = self.data.copy()
+        self.filledPits = self.elev.copy()
         if self.fill_flats_below_sea:
-            sea_mask = self.data != 0
+            sea_mask = self.elev != 0
         else:
-            sea_mask = self.data > 0
-        flat = (spndi.minimum_filter(self.data, (3, 3)) >= self.data) & sea_mask
+            sea_mask = self.elev > 0
+        flat = (spndi.minimum_filter(self.elev, (3, 3)) >= self.elev) & sea_mask
         flats, n = spndi.label(flat, structure=FLATS_KERNEL3)
         objs = spndi.find_objects(flats)
         cnt = 0
         max_size = {}
         for i, _obj in enumerate(objs):
-            obj = grow_obj(_obj, self.data.shape)
-            if not (self.data[obj].shape[0] == self.data[_obj].shape[0] + 2 and self.data[obj].shape[1] == self.data[_obj].shape[1] + 2):
+            obj = grow_obj(_obj, self.elev.shape)
+            if not (self.elev[obj].shape[0] == self.elev[_obj].shape[0] + 2 and self.elev[obj].shape[1] == self.elev[_obj].shape[1] + 2):
                 continue
             mask = flats[obj] == i+1
             edge_mask = spndi.maximum_filter(mask, (3, 3)) ^ mask
-            my_elev = self.data[obj][mask][0]
-            edge_condition = np.all(self.data[obj][edge_mask] - 1 == my_elev)
+            my_elev = self.elev[obj][mask][0]
+            edge_condition = np.all(self.elev[obj][edge_mask] - 1 == my_elev)
             if edge_condition and mask.sum() <= self.maximum_pit_area:
                 if mask.sum() not in max_size:
                     max_size[mask.sum()] = 0
                 max_size[mask.sum()] += 1
                 cnt = cnt + 1
                 self.filledPits[obj] += 1*mask
-        self.data = np.ma.masked_array(self.filledPits, mask=np.isnan(self.filledPits))
+        self.elev = self.filledPits
 
 
     def calc_fill_flats(self):
@@ -551,7 +472,7 @@ class DEMProcessor(object):
             self.calc_fill_pit_artifacts()
 
         # fill/interpolate flats first
-        data = np.ma.filled(self.data.astype('float64'), np.nan)
+        data = np.ma.filled(self.elev.astype('float64'), np.nan)
         filled = data.copy()
         edge = np.ones_like(data, bool)
         edge[1:-1, 1:-1] = False
@@ -564,7 +485,7 @@ class DEMProcessor(object):
         for i, _obj in enumerate(objs):
             obj = grow_obj(_obj, data.shape)
             self._fill_flat(data[obj], filled[obj], flats[obj]==i+1, edge[obj])
-        self.data = np.ma.masked_array(filled, mask=np.isnan(filled))
+        self.elev = filled
 
 
         # if debug:
@@ -586,12 +507,12 @@ class DEMProcessor(object):
         # Tarboton http://www.neng.usu.edu/cee/faculty/dtarb/96wr03137.pdf
         print("starting slope/direction calculation")
         self.mag, self.direction = self._slopes_directions(
-                self.data, self.dX, self.dY, 'tarboton')
+                self.elev, self.dX, self.dY, 'tarboton')
         # Find the flat regions. This is mostly simple (look for mag < 0),
         # but the downstream pixel at the edge of a flat will have a
         # calcuable angle which will not be accurate. We have to also find
         # these edges and set their magnitude to -1 (that is, the flat_id)
-        flats = self._find_flats_edges(self.data, self.mag, self.direction)
+        flats = self._find_flats_edges(self.elev, self.mag, self.direction)
         self.direction[flats] = FLAT_ID_INT
         self.mag[flats] = FLAT_ID_INT
         self.flats = flats
@@ -701,9 +622,9 @@ class DEMProcessor(object):
             self.calc_slopes_directions()
 
         # Initialize the upstream area
-        uca_edge_init = np.zeros(self.data.shape, 'float64')
-        uca_edge_done = np.zeros(self.data.shape, bool)
-        uca_edge_todo = np.zeros(self.data.shape, bool)
+        uca_edge_init = np.zeros(self.elev.shape, 'float64')
+        uca_edge_done = np.zeros(self.elev.shape, bool)
+        uca_edge_todo = np.zeros(self.elev.shape, bool)
         edge_init_done, edge_init_todo = None, None
         if edge_init_data is not None:
             edge_init_data, edge_init_done, edge_init_todo = edge_init_data
@@ -722,13 +643,13 @@ class DEMProcessor(object):
                     edge_init_todo[key].reshape(uca_edge_init[val].shape)
 
         if uca_init is None:
-            self.uca = np.full(self.data.shape, FLAT_ID_INT, 'float64')
+            self.uca = np.full(self.elev.shape, FLAT_ID_INT, 'float64')
         else:
             self.uca = uca_init.astype('float64')
 
         if uca_init is None:
             print("Starting uca calculation")
-            res = self._calc_uca_chunk(self.data, self.dX, self.dY,
+            res = self._calc_uca_chunk(self.elev, self.dX, self.dY,
                                        self.direction, self.mag,
                                        self.flats,
                                        area_edges=uca_edge_init,
@@ -740,7 +661,7 @@ class DEMProcessor(object):
             print("Starting edge resolution round: ", end=' ')
             # last return value will be None: edge_
             area, e2doi, edone, _ = \
-                self._calc_uca_chunk_update(self.data, self.dX, self.dY,
+                self._calc_uca_chunk_update(self.elev, self.dX, self.dY,
                                             self.direction, self.mag,
                                             self.flats,
                                             area_edges=uca_edge_init,
@@ -770,7 +691,7 @@ class DEMProcessor(object):
         the treatment is explicit.
         """
         data, dX, dY, direction, flats = \
-            self.data, self.dX, self.dY, self.direction, self.flats
+            self.elev, self.dX, self.dY, self.direction, self.flats
         sides = ['left', 'right', 'top', 'bottom']
         slices_o = ((slice(None), slice(1, 2)), (slice(None), slice(-2, -1)),
                     (slice(1, 2), slice(None)), (slice(-2, -1), slice(None)))
@@ -928,7 +849,7 @@ class DEMProcessor(object):
         else:
             done = drain_pixels_done(ids, done, A.row, A.col)
 
-        done[data.mask] = True  # deal with no-data values
+        done[np.isnan(data)] = True  # deal with no-data values
         #
         ids = ids0.copy()
         # Set all the edges to "done" for ids0. This ensures that no edges
@@ -1094,7 +1015,7 @@ class DEMProcessor(object):
         done = np.zeros(data.shape, bool)
         done.ravel()[ids] = True
         # deal with no-data values
-        done[1:-1, 1:-1] = done[1:-1, 1:-1] | data.mask[1:-1, 1:-1]
+        done[1:-1, 1:-1] = done[1:-1, 1:-1] 
 
         # Check the inlet edges
         edge_todo = np.zeros_like(done)
@@ -1112,7 +1033,7 @@ class DEMProcessor(object):
         # Will do the tile-level doneness
         edge_todo_i_no_mask = edge_todo.copy() & edge_todo_i_no_mask
         edge_todo_no_mask = edge_todo_i_no_mask.copy()  # tile-level doneness
-        edge_todo[data.mask] = False  # Don't do masked areas
+        edge_todo[np.isnan(data)] = False  # Don't do masked areas
         # Initialize done edges
         edge_todo_i = edge_todo.copy()
         ids_old = np.zeros_like(ids)
@@ -1167,7 +1088,7 @@ class DEMProcessor(object):
         area[flats] = np.nan
 
         edge_done = ~edge_todo
-        edge_done[data.mask] = True  # Don't do masked areas
+        edge_done[np.isnan(data)] = True  # Don't do masked areas
 
         if self.apply_uca_limit_edges:
             # 2x because of bifurcations (maybe should be more than 2x, but
@@ -1435,7 +1356,7 @@ class DEMProcessor(object):
         updated for these pits and flats so that the TWI can be computed.
         """
 
-        e = elev.data.ravel()
+        e = elev.ravel()
 
         pit_i = []
         pit_j = []
@@ -1694,7 +1615,7 @@ class DEMProcessor(object):
         """
 
         if data is None:
-            data = self.data
+            data = self.elev
 
         B = A.tocoo()
         self._plot_connectivity_helper(B.col, B.row, B.data, data, lims)
@@ -1761,7 +1682,7 @@ class DEMProcessor(object):
         matshow(td_mag.raster_data); colorbar()
         title('Taudem magnitude')
 
-        matshow(self.data); colorbar()
+        matshow(self.elev); colorbar()
         title('The test data (elevation)')
 
         diff = (td_ang.raster_data - self.direction) / np.pi * 180.0

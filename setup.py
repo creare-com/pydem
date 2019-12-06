@@ -92,7 +92,8 @@ setup(
         'numpy',
         'scipy',
         'geopy',
-        'traits',
+        'traitlets',
+        'traittypes'
         ],
 
     entry_points = {
