@@ -44,12 +44,6 @@ It presently only supports WGS84 coordinate systems
 
 Development Notes
 ------------------
-TODO: Replace complete file loading with partial loading from disk to RAM.
-      Presently, an entire geotiff is loaded into memory, which makes the
-      chunk calculation less useful because the memory restriction is still
-      present
-TODO: Improve general memory usage (following from previous TODO).
-TODO: Cythonize magnitude and slope calculations
 
 Created on Wed Jun 18 14:19:04 2014
 
@@ -105,12 +99,6 @@ class DEMProcessor(tl.HasTraits):
     topographic wetness index.
 
     """
-    # Flag that when true will ensure edge UCA is continuous across chunks
-    resolve_edges = tl.Bool(True)
-#    apply_uca_limit_edges = True
-#    apply_twi_limits = True
-#    apply_twi_limits_on_uca = True
-
     fill_flats = tl.Bool(True)
     fill_flats_below_sea = tl.Bool(False)
     fill_flats_source_tol = tl.Int(1)
@@ -132,8 +120,6 @@ class DEMProcessor(tl.HasTraits):
     # When calculating TWI, should UCA be limited to max value?
     apply_twi_limits_on_uca = tl.Bool(False)
 
-    save_projection = tl.Unicode('EPSG:4326')
-
     direction = tt.Array(None, allow_none=True)  # Direction of slope in radians
     mag = tt.Array(None, allow_none=True)  # magnitude of slopes m/m
     uca = tt.Array(None, allow_none=True)  # upstream contributing area
@@ -148,11 +134,9 @@ class DEMProcessor(tl.HasTraits):
     done = tl.Instance(np.ndarray, None)  # Marks if edges are done
 
     plotflag = tl.Bool(False)  # Debug plots
-    # Use uniform values for dx/dy or obtain from geotiff
-    dx_dy_from_file = tl.Bool(True)
 
-    dX = tl.Instance(np.ndarray, None, allow_none=True)  # delta x
-    dY = tl.Instance(np.ndarray, None, allow_none=True)  # delta y
+    dX = tt.Array(None, allow_none=True)  # delta x
+    dY = tt.Array(None, allow_none=True)  # delta y
 
     @tl.default('dX')
     def _default_dX(self):
@@ -204,100 +188,6 @@ class DEMProcessor(tl.HasTraits):
     def get_full_fn(self, name, rootpath='.'):
         return os.path.join(rootpath, name, self.get_fn(name))
 
-    def save_array(self, array, name=None, partname=None, rootpath='.',
-                   raw=False, as_int=True):
-        """
-        Standard array saving routine
-
-        Parameters
-        -----------
-        array : array
-            Array to save to file
-        name : str, optional
-            Default 'array.tif'. Filename of array to save. Over-writes
-            partname.
-        partname : str, optional
-            Part of the filename to save (with the coordinates appended)
-        rootpath : str, optional
-            Default '.'. Which directory to save file
-        raw : bool, optional
-            Default False. If true will save a .npz of the array. If false,
-            will save a geotiff
-        as_int : bool, optional
-            Default True. If true will save array as an integer array (
-            excellent compression). If false will save as float array.
-        """
-        if name is None and partname is not None:
-            fnl_file = self.get_full_fn(partname, rootpath)
-            tmp_file = os.path.join(rootpath, partname,
-                                    self.get_fn(partname + '_tmp'))
-        elif name is not None:
-            fnl_file = name
-            tmp_file = fnl_file + '_tmp.tiff'
-        else:
-            fnl_file = 'array.tif'
-        if not raw:
-            s_file = self.elev.clone_traits()
-            s_file.raster_data = np.ma.masked_array(array)
-            count = 10
-            while count > 0 and (s_file.raster_data.mask.sum() > 0 \
-                    or np.isnan(s_file.raster_data).sum() > 0):
-                s_file.inpaint()
-                count -= 1
-
-            s_file.export_to_geotiff(tmp_file)
-
-            if as_int:
-                cmd = "gdalwarp -overwrite -multi -wm 2000 -co BIGTIFF=YES -of GTiff -co compress=lzw -ot Int16 -co TILED=YES -wo OPTIMIZE_SIZE=YES -r near -t_srs %s %s %s" \
-                    % (self.save_projection, tmp_file, fnl_file)
-            else:
-                cmd = "gdalwarp -overwrite -multi -wm 2000 -co BIGTIFF=YES -of GTiff -co compress=lzw -co TILED=YES -wo OPTIMIZE_SIZE=YES -r near -t_srs %s %s %s" \
-                    % (self.save_projection, tmp_file, fnl_file)
-            print("<<"*4, cmd, ">>"*4)
-            subprocess.call(cmd, shell=True)
-            os.remove(tmp_file)
-        else:
-            np.savez_compressed(fnl_file, np.array(array))
-
-    def save_uca(self, rootpath, raw=False, as_int=False):
-        """ Saves the upstream contributing area to a file
-        """
-        self.save_array(self.uca, None, 'uca', rootpath, raw, as_int=as_int)
-
-    def save_twi(self, rootpath, raw=False, as_int=True):
-        """ Saves the topographic wetness index to a file
-        """
-        self.twi = np.ma.masked_array(self.twi, mask=self.twi <= 0,
-                                      fill_value=-9999)
-        #  self.twi = self.twi.filled()
-        self.twi[self.flats] = 0
-        self.twi.mask[self.flats] = True
-        # self.twi = self.flats
-        self.save_array(self.twi, None, 'twi', rootpath, raw, as_int=as_int)
-
-    def save_elevation(self, rootpath, raw=False, as_int=False):
-        """ Saves the (interpolated/filled) elevation to a file
-        """
-        self.save_array(self.elev, None, 'elev', rootpath, raw, as_int=as_int)
-
-    def save_slope(self, rootpath, raw=False, as_int=False):
-        """ Saves the magnitude of the slope to a file
-        """
-        self.save_array(self.mag, None, 'mag', rootpath, raw, as_int=as_int)
-
-    def save_direction(self, rootpath, raw=False, as_int=False):
-        """ Saves the direction of the slope to a file
-        """
-        self.save_array(self.direction, None, 'ang', rootpath, raw, as_int=as_int)
-
-    def save_outputs(self, rootpath='.', raw=False):
-        """Saves TWI, UCA, magnitude and direction of slope to files.
-        """
-        self.save_twi(rootpath, raw)
-        self.save_uca(rootpath, raw)
-        self.save_slope(rootpath, raw)
-        self.save_direction(rootpath, raw)
-
     def load_array(self, fn, name):
         """
         Can only load files that were saved in the 'raw' format.
@@ -320,8 +210,7 @@ class DEMProcessor(tl.HasTraits):
     def load_elevation(self, fn):
         """Loads pre-computed (interpolated/filled) elevation from file
         """
-        self.load_array(fn, 'data')
-        self.elev = np.ma.array(self.elev, mask=np.isnan(self.elev))
+        self.load_array(fn, 'elev')
 
     def load_slope(self, fn):
         """Loads pre-computed slope magnitude from file
