@@ -88,12 +88,13 @@ setup(
     python_requires='>=3',
 
     install_requires=[
-        #'gdal',
+        'rasterio',
         'numpy',
         'scipy',
         'geopy',
         'traitlets',
-        'traittypes'
+        'traittypes',
+        'zarr'
         ],
 
     entry_points = {
