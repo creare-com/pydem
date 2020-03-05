@@ -21,14 +21,12 @@ Created on Fri Jun 20 11:26:08 2014
 NOTE: x = lat, y = lon -- THIS IS REVERSED FROM THE USUAL IDEA
 """
 import os
-import gdal
 
 import numpy as np
 from scipy.ndimage.filters import gaussian_filter
 
 from .taudem import taudem
-from .reader.gdal_reader import GdalReader
-from .utils import mk_geotiff_obj, mk_dx_dy_from_geotif_layer, get_fn_from_coords
+from .utils import mk_geotiff_obj, mk_dx_dy_from_geotif_layer, get_fn_from_coords, save_raster, read_raster
 PLOT_TESTCASES = True
 
 #if PLOT_TESTCASES:
@@ -52,13 +50,8 @@ def mk_xy_latlon(N):
     raster = np.zeros((N, N))
     if os.path.exists('temp.tif'):
         os.remove('temp.tif')
-    obj, driver = mk_geotiff_obj(raster, 'temp.tif')
-    del obj
-    del driver
-    obj = GdalReader(file_name='temp.tif').raster_layers[0]
-    dx, dy = mk_dx_dy_from_geotif_layer(obj)
-    del obj
-    os.remove('temp.tif')
+    r, transform = mk_geotiff_obj(raster, 'temp.tif')
+    dx, dy = mk_dx_dy_from_geotif_layer(r)
     y = np.concatenate([[0], np.cumsum(dx)])
     x = np.concatenate([[0], np.cumsum(dy)])
     # Center it on zero
@@ -81,8 +74,8 @@ def make_elev_ang(testnum, NN, raster, angle, uca=None, testdir='testtiff'):
         if not os.path.exists(testdir):
             os.makedirs(testdir)
         if not os.path.exists(filename['elev']):
-            elev, driver = mk_geotiff_obj(raster, filename['elev'])
-            del driver
+            elev, transform = mk_geotiff_obj(raster, filename['elev'])
+            del transform
             del elev
             print("Created", filename['elev'])
             ang, driver = mk_geotiff_obj(angle, filename['ang'])
@@ -101,7 +94,6 @@ def make_elev_ang(testnum, NN, raster, angle, uca=None, testdir='testtiff'):
         elev = None
         ang = None
         driver = None
-
 
 # Define the inidividual elevation/angles for the test-cases
 def case_cone(x, y, noise=False):
@@ -295,9 +287,9 @@ def case_real_data(x, y, filename='N43W-72_N44W-71_elev.tif', NN=None):
         NX0, NX, NY0, NY = NN
     else:
         NX0, NX, NY0, NY = [0, NN, 0, NN]
-    elev_file = GdalReader(file_name=filename)
-    test_data, = elev_file.raster_layers
-    raster = test_data.raster_data[NX0:NX, NY0:NY]
+    elev_file = read_raster(file_name=filename)
+    test_data = elev_file.read()
+    raster = test_data[NX0:NX, NY0:NY]
     del elev_file
     del test_data
     angle = -1 + 0 * raster
@@ -387,10 +379,7 @@ def mk_test_multifile(testnum, NN, testdir, nx_grid=3, ny_grid=4, nx_overlap=16,
         return left_edge, right_edge
 
     elev_data, ang_data, fel_data = get_test_data(testnum, NN)
-    try:
-        raster = fel_data.raster_data
-    except:
-        raster = elev_data.raster_data
+    raster = elev_data
 
     ni, nj = raster.shape
 
@@ -415,7 +404,7 @@ def mk_test_multifile(testnum, NN, testdir, nx_grid=3, ny_grid=4, nx_overlap=16,
                 'min,max = (%g to %g, %g to %g)' % (lat.min(), lat.max(),
                                                     lon.min(), lon.max()))
             mk_geotiff_obj(raster[te:be, le:re], fn,
-                           bands=1, gdal_data_type=gdal.GDT_Float32,
+                           bands=1,
                            lat=[lat[te], lat[be-1]], lon=[lon[le], lon[re-1]])
 
 
@@ -528,17 +517,7 @@ def get_test_data(test_num, NN, testdir='testtiff'):
     filenames = make_file_names(test_num, NN, testdir)
     if not os.path.exists(filenames['elev']):
         make_test_files(NN, testdir=testdir, testnum=test_num)
-    elev_file = GdalReader(file_name=filenames['elev'])
-    elev_data, = elev_file.raster_layers
-    ang_file = GdalReader(file_name=filenames['ang'])
-    ang_data, = ang_file.raster_layers
-    if not os.path.exists(filenames['fel']):
-        cmd = ('pitremove -z "%s" -fel "%s" ' % (filenames['elev'],
-                                                 filenames['fel']))
-        taudem._run(cmd)
-    fel_file = GdalReader(file_name=filenames['fel'])
-    fel_data,  = fel_file.raster_layers
-    del elev_file
-    del ang_file
-    return elev_data, ang_data, fel_data
+    elev_data = read_raster(filenames['elev']).read(1)
+    ang_data = read_raster(filenames['ang']).read(1)
+    return elev_data, ang_data, None
 
