@@ -1,4 +1,9 @@
 # -*- coding: utf-8 -*-
+# NOTES
+# TODO: Resolve any overlaps between files. Basically no changes for slope/aspect elev,
+#       but uca and twi we figure out the unique tiles and construct the whole thing that way
+# TODO: Edge resolution and population
+
 import os
 import traceback
 import subprocess
@@ -26,6 +31,35 @@ def calc_elev_cond(fn, out_fn, out_slice):
     except Exception as e:
         return (0, fn + ':' + str(e))
     return (1, "{}: success".format(fn))
+
+def calc_aspect_slope(fn, out_fn_aspect, out_fn_slope, out_fn, out_slice):
+    try: 
+        kwargs = dem_processor_from_raster_kwargs(fn)
+        kwargs['elev'] = zarr.open(out_fn, mode='r')['elev'][out_slice]
+        kwargs['fill_flats'] = False  # assuming we already did this
+        dp = DEMProcessor(**kwargs)
+        dp.calc_slopes_directions()
+        save_result(dp.direction.astype(np.float32), out_fn_aspect, out_slice)
+        save_result(dp.mag.astype(np.float32), out_fn_slope, out_slice)
+    except Exception as e:
+        return (0, fn + ':' + str(e))
+    return (1, "{}: success".format(fn))
+
+def calc_uca(fn, out_fn_uca, out_fn, out_slice):
+    try:
+        kwargs = dem_processor_from_raster_kwargs(fn)
+        kwargs['elev'] = zarr.open(out_fn, mode='r')['elev'][out_slice]
+        kwargs['direction'] = zarr.open(out_fn, mode='r')['aspect'][out_slice]
+        kwargs['mag'] = zarr.open(out_fn, mode='r')['slope'][out_slice]
+        kwargs['fill_flats'] = False  # assuming we already did this
+        dp = DEMProcessor(**kwargs)
+        dp.find_flats()
+        dp.calc_uca()
+        save_result(dp.uca.astype(np.float32), out_fn_uca, out_slice)
+    except Exception as e:
+        return (0, fn + ':' + str(e))
+    return (1, "{}: success".format(fn))
+
 
 def save_result(result, out_fn, out_slice):
     # save the results
@@ -160,6 +194,51 @@ class ProcessManager(tl.HasTraits):
         out_file = os.path.join(self.out_path, 'elev')
         zf = zarr.open(out_file, shape=self.grid_size_tot, chunk=self.grid_chunk, mode='a')
 
+        # populate kwds
+        kwds = [dict(fn=self.elev_source_files[i],
+                     out_fn=out_file, out_slice=self.grid_slice[i])
+                for i in range(self.n_inputs)]
+
+        success = self.queue_processes(calc_elev_cond, kwds)
+        return success
+
+    def process_aspect_slope(self):
+        # initialize zarr output
+        out_aspect = os.path.join(self.out_path, 'aspect')
+        zf = zarr.open(out_aspect, shape=self.grid_size_tot, chunk=self.grid_chunk, mode='a')
+        out_slope = os.path.join(self.out_path, 'slope')
+        zf = zarr.open(out_slope, shape=self.grid_size_tot, chunk=self.grid_chunk, mode='a')
+
+        # populate kwds
+        kwds = [dict(fn=self.elev_source_files[i],
+                     out_fn_aspect=out_aspect,
+                     out_fn_slope=out_slope,
+                     out_fn=self.out_path,
+                     out_slice=self.grid_slice[i])
+                for i in range(self.n_inputs)]
+
+        success = self.queue_processes(calc_aspect_slope, kwds)
+        return success
+
+    def process_uca(self):
+        # initialize zarr output
+        out_uca = os.path.join(self.out_path, 'uca')
+        zf = zarr.open(out_uca, shape=self.grid_size_tot, chunk=self.grid_chunk, mode='a')
+
+        # populate kwds
+        kwds = [dict(fn=self.elev_source_files[i],
+                     out_fn_uca=out_uca,
+                     out_fn=self.out_path,
+                     out_slice=self.grid_slice[i])
+                for i in range(self.n_inputs)]
+
+        success = self.queue_processes(calc_uca, kwds)
+        return success
+
+    def process_uca_edges(self):
+        pass
+
+    def queue_processes(self, function, kwds, indices=None):
         # initialize indices if not created
         if indices is None:
             indices = np.ones(self.n_inputs, bool)
@@ -169,9 +248,8 @@ class ProcessManager(tl.HasTraits):
 
         # submit workers
         print ("Sumitting workers", end='...')
-        res = [pool.apply_async(calc_elev_cond, kwds=dict(fn=self.elev_source_files[i],
-            out_fn=out_file, out_slice=self.grid_slice[i]))
-            for i in range(self.n_inputs) if indices[i]]
+        res = [pool.apply_async(function, kwds=kwds[i]) 
+                for i in range(self.n_inputs) if indices[i]]
         print(" waiting for computation")
         pool.close()  # prevent new tasks from being submitted
         pool.join()   # wait for tasks to finish
@@ -180,18 +258,9 @@ class ProcessManager(tl.HasTraits):
         print('\n'.join([s[1] for s in success]))
         return success
 
-    def process_aspect_slope(self):
-        pass
 
-    def process_uca(self):
-        pass
-
-    def process_uca_edges(self):
-        pass
-
-    def queue_processes(self, function):
-        pass
-
-
-    def process_twi_files(self):
-        pass
+    def process_twi(self):
+        self.compute_grid()
+        self.process_elevation()
+        self.process_aspect_slope()
+        self.process_uca()
