@@ -33,9 +33,10 @@ def calc_elev_cond(fn, out_fn, out_slice):
     return (1, "{}: success".format(fn))
 
 def calc_aspect_slope(fn, out_fn_aspect, out_fn_slope, out_fn, out_slice):
+    #if 1:
     try: 
         kwargs = dem_processor_from_raster_kwargs(fn)
-        kwargs['elev'] = zarr.open(out_fn, mode='r')['elev'][out_slice]
+        kwargs['elev'] = zarr.open(out_fn, mode='a')['elev'][out_slice]
         kwargs['fill_flats'] = False  # assuming we already did this
         dp = DEMProcessor(**kwargs)
         dp.calc_slopes_directions()
@@ -48,9 +49,9 @@ def calc_aspect_slope(fn, out_fn_aspect, out_fn_slope, out_fn, out_slice):
 def calc_uca(fn, out_fn_uca, out_fn, out_slice):
     try:
         kwargs = dem_processor_from_raster_kwargs(fn)
-        kwargs['elev'] = zarr.open(out_fn, mode='r')['elev'][out_slice]
+        kwargs['elev'] = zarr.open(out_fn, mode='a')['elev'][out_slice]
         kwargs['direction'] = zarr.open(out_fn, mode='r')['aspect'][out_slice]
-        kwargs['mag'] = zarr.open(out_fn, mode='r')['slope'][out_slice]
+        kwargs['mag'] = zarr.open(out_fn, mode='a')['slope'][out_slice]
         kwargs['fill_flats'] = False  # assuming we already did this
         dp = DEMProcessor(**kwargs)
         dp.find_flats()
@@ -71,7 +72,7 @@ def save_result(result, out_fn, out_slice):
         outstr += out_fn + '\n' + str(e)
     # verify in case another process overwrote my changes
     count = 0
-    while np.any(result != zf[out_slice]):
+    while np.any(np.abs(result - zf[out_slice]) > 1e-8):
         # try again
         try: 
             zf[out_slice] = result
@@ -117,17 +118,20 @@ class ProcessManager(tl.HasTraits):
         return zarr.open(self.out_path, mode='a')
 
     # Working attributes
-    index = tt.Array()  # dlon/dj, dlon/di, lonstart, dlat/dj, dlat/di, latstart, nrows, ncols
+    index = tt.Array()  # left, bottom, right, top, dlat, dlon, nrows, ncols 
     @tl.default('index')
     def compute_index(self):
-        index = np.zeros((len(self.elev_source_files), 11))
+        index = np.zeros((len(self.elev_source_files), 8))
         for i, f in enumerate(self.elev_source_files):
             r = rasterio.open(f, 'r')
-            index[i, :9] = np.array(r.transform)
-            index[i, 9:] = r.shape
+            index[i, :4] = np.array(r.bounds)
+            index[i, 4] = r.transform.a
+            index[i, 5] = r.transform.e
+            index[i, 6:] = r.shape
         return index
 
     grid_id = tt.Array()
+    grid_id2i = tt.Array()
     grid_slice = tl.List()
     grid_shape = tt.Array()
     grid_lat_size = tt.Array()
@@ -144,13 +148,14 @@ class ProcessManager(tl.HasTraits):
 
     def compute_grid(self):
         # Get the unique lat/lons
-        lats = np.round(self.index[:, 5], self.grid_round_decimals)
-        lons = np.round(self.index[:, 2], self.grid_round_decimals)
+        lats = np.round(self.index[:, 3], self.grid_round_decimals)
+        lons = np.round(self.index[:, 0], self.grid_round_decimals)
         ulats = np.sort(np.unique(lats))[::-1].tolist()
         ulons = np.sort(np.unique(lons)).tolist()
 
-        grid_id = np.zeros((self.index.shape[0], 3), dtype=int)
         grid_shape = (len(ulats), len(ulons))
+        grid_id = np.zeros((self.n_inputs, 3), dtype=int)
+        grid_id2i = -np.ones(grid_shape, dtype=int)
         grid_lat_size = np.ones(len(ulats), dtype=int) * -1
         grid_lon_size = np.ones(len(ulons), dtype=int) * -1
         
@@ -158,17 +163,18 @@ class ProcessManager(tl.HasTraits):
         for i in range(self.n_inputs):
             grid_id[i, :2] = [ulats.index(lats[i]), ulons.index(lons[i])]
             grid_id[i, 2] = grid_id[i, 1] + grid_id[i, 0] * grid_shape[1]
+            grid_id2i[grid_id[i, 0], grid_id[i, 1]] = i
 
             # check sizes match
             if grid_lat_size[grid_id[i, 0]] < 0:
-                grid_lat_size[grid_id[i, 0]] = self.index[i, 9]
+                grid_lat_size[grid_id[i, 0]] = self.index[i, 6]
             else:
-                assert grid_lat_size[grid_id[i, 0]] == self.index[i, 9]
+                assert grid_lat_size[grid_id[i, 0]] == self.index[i, 6]
 
             if grid_lon_size[grid_id[i, 1]] < 0:
-                grid_lon_size[grid_id[i, 1]] = self.index[i, 10]
+                grid_lon_size[grid_id[i, 1]] = self.index[i, 7]
             else:
-                assert grid_lon_size[grid_id[i, 1]] == self.index[i, 10]
+                assert grid_lon_size[grid_id[i, 1]] == self.index[i, 7]
 
         # Figure out the slice indices in the zarr array for each elevation file
         grid_lat_size_cumulative = np.concatenate([[0], grid_lat_size.cumsum()])
@@ -182,6 +188,7 @@ class ProcessManager(tl.HasTraits):
             grid_slice.append(slc)
 
         self.grid_id = grid_id
+        self.grid_id2i = grid_id2i
         self.grid_shape = grid_shape
         self.grid_lat_size = grid_lat_size
         self.grid_lon_size = grid_lon_size
@@ -189,7 +196,18 @@ class ProcessManager(tl.HasTraits):
         self.grid_slice = grid_slice
         self.grid_chunk = [grid_lat_size.min(), grid_lon_size.min()]
 
+    def compute_grid_overlaps(self):
+        # Figure out the unique slices associated with each file
+        self.grid_slice_unique = None
+
+        # Figure out where to get new data on edges for each uca, this is at the start of a new round
+        self.edge_data = [{'left': slice, 'right': slice, 'top': slice, 'bottom': slice}]
+
+        # Figure out neighbors, after computing updates, will post that these neighbors have new data
+        self.neighbors =  [{'left': id, 'right': id, 'top': id, 'bottom': id}]
+
     def process_elevation(self, indices=None):
+        # TODO: Also find max, mean, and min elevation on edges
         # initialize zarr output
         out_file = os.path.join(self.out_path, 'elev')
         zf = zarr.open(out_file, shape=self.grid_size_tot, chunk=self.grid_chunk, mode='a')
@@ -199,6 +217,7 @@ class ProcessManager(tl.HasTraits):
                      out_fn=out_file, out_slice=self.grid_slice[i])
                 for i in range(self.n_inputs)]
 
+        # TODO: Save this to prevent recomputation
         success = self.queue_processes(calc_elev_cond, kwds)
         return success
 
@@ -224,6 +243,7 @@ class ProcessManager(tl.HasTraits):
         # initialize zarr output
         out_uca = os.path.join(self.out_path, 'uca')
         zf = zarr.open(out_uca, shape=self.grid_size_tot, chunk=self.grid_chunk, mode='a')
+        # Also initialize done and todo, on the overlap space
 
         # populate kwds
         kwds = [dict(fn=self.elev_source_files[i],
@@ -248,6 +268,8 @@ class ProcessManager(tl.HasTraits):
 
         # submit workers
         print ("Sumitting workers", end='...')
+        #success = [function(**kwds[i]) 
+        #        for i in range(self.n_inputs) if indices[i]]
         res = [pool.apply_async(function, kwds=kwds[i]) 
                 for i in range(self.n_inputs) if indices[i]]
         print(" waiting for computation")
@@ -257,7 +279,6 @@ class ProcessManager(tl.HasTraits):
         success = [r.get(timeout=0.0001) for r in res]
         print('\n'.join([s[1] for s in success]))
         return success
-
 
     def process_twi(self):
         self.compute_grid()
