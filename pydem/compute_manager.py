@@ -117,8 +117,12 @@ class ProcessManager(tl.HasTraits):
     def _out_file_default(self):
         return zarr.open(self.out_path, mode='a')
 
+    def _i(self, name):
+        ''' helper function for indexing self.index '''
+        return ['left', 'bottom', 'right', 'top', 'dlon', 'dlat', 'nrows', 'ncols'].index(name)
+
     # Working attributes
-    index = tt.Array()  # left, bottom, right, top, dlat, dlon, nrows, ncols 
+    index = tt.Array()  # left, bottom, right, top, dlon, dlat, nrows, ncols 
     @tl.default('index')
     def compute_index(self):
         index = np.zeros((len(self.elev_source_files), 8))
@@ -133,11 +137,17 @@ class ProcessManager(tl.HasTraits):
     grid_id = tt.Array()
     grid_id2i = tt.Array()
     grid_slice = tl.List()
+    grid_slice_unique = tl.List()
+    grid_slice_noverlap = tl.List()
     grid_shape = tt.Array()
     grid_lat_size = tt.Array()
     grid_lon_size = tt.Array()
+    grid_lat_size_unique = tt.Array()
+    grid_lon_size_unique = tt.Array()
     grid_size_tot = tt.Array()
     grid_chunk = tt.Array()
+    edge_data = tl.List()
+
 
     # Properties
     @property 
@@ -148,8 +158,8 @@ class ProcessManager(tl.HasTraits):
 
     def compute_grid(self):
         # Get the unique lat/lons
-        lats = np.round(self.index[:, 3], self.grid_round_decimals)
-        lons = np.round(self.index[:, 0], self.grid_round_decimals)
+        lats = np.round(self.index[:, self._i('top')], self.grid_round_decimals)
+        lons = np.round(self.index[:, self._i('left')], self.grid_round_decimals)
         ulats = np.sort(np.unique(lats))[::-1].tolist()
         ulons = np.sort(np.unique(lons)).tolist()
 
@@ -167,14 +177,14 @@ class ProcessManager(tl.HasTraits):
 
             # check sizes match
             if grid_lat_size[grid_id[i, 0]] < 0:
-                grid_lat_size[grid_id[i, 0]] = self.index[i, 6]
+                grid_lat_size[grid_id[i, 0]] = self.index[i, self._i('nrows')]
             else:
-                assert grid_lat_size[grid_id[i, 0]] == self.index[i, 6]
+                assert grid_lat_size[grid_id[i, 0]] == self.index[i, self._i('nrows')]
 
             if grid_lon_size[grid_id[i, 1]] < 0:
-                grid_lon_size[grid_id[i, 1]] = self.index[i, 7]
+                grid_lon_size[grid_id[i, 1]] = self.index[i, self._i('ncols')]
             else:
-                assert grid_lon_size[grid_id[i, 1]] == self.index[i, 7]
+                assert grid_lon_size[grid_id[i, 1]] == self.index[i, self._i('ncols')]
 
         # Figure out the slice indices in the zarr array for each elevation file
         grid_lat_size_cumulative = np.concatenate([[0], grid_lat_size.cumsum()])
@@ -196,15 +206,93 @@ class ProcessManager(tl.HasTraits):
         self.grid_slice = grid_slice
         self.grid_chunk = [grid_lat_size.min(), grid_lon_size.min()]
 
+    def _calc_overlap(self, a, da, b, db, s, tie):
+        '''
+        ...bbbb|bb       db = da/2
+           a a |a . . .
+        n_overlap_a = 1
+        n_overlap_b = 4
+
+        o
+        o
+        o
+        ab
+        ab
+        ---
+        ab
+        o
+        o
+        o
+        n_overlap_a = 1
+        n_overlap_b = 2
+        '''
+        n_overlap_a = int(np.round(((b - a) / da + tie - 0.01) / 2))
+        n_overlap_a = max(n_overlap_a, 0)
+        n_overlap_b = int(np.round(((b - a) / db + 1 - tie - 0.01) / 2))
+        n_overlap_b = max(n_overlap_b, 0)
+        return n_overlap_a, n_overlap_b
+
     def compute_grid_overlaps(self):
-        # Figure out the unique slices associated with each file
-        self.grid_slice_unique = None
 
-        # Figure out where to get new data on edges for each uca, this is at the start of a new round
-        self.edge_data = [{'left': slice, 'right': slice, 'top': slice, 'bottom': slice}]
+        self.grid_slice_unique = []
+        self.edge_data = []
+        for i in range(self.n_inputs):
+            id = self.grid_id[i]
 
-        # Figure out neighbors, after computing updates, will post that these neighbors have new data
-        self.neighbors =  [{'left': id, 'right': id, 'top': id, 'bottom': id}]
+            # Figure out the unique slices associated with each file
+            slc = self.grid_slice[i]
+
+            # do left-right overlaps
+            if id[1] > 0:  # left
+                left_id = self.grid_id2i[id[0], id[1] - 1]
+                lon_start, lon_start_e = self._calc_overlap(
+                        self.index[i, self._i('left')],
+                        self.index[i, self._i('dlon')],
+                        self.index[left_id, self._i('right')],
+                        self.index[left_id, self._i('dlon')],
+                        slc[1].start, tie=0)
+            else:
+                lon_start = lon_start_e = 0
+            if id[1] < (self.grid_id2i.shape[1] - 1):  # right
+                right_id = self.grid_id2i[id[0], id[1] + 1]
+                lon_end, lon_end_e = self._calc_overlap(
+                        self.index[right_id, self._i('left')],
+                        self.index[i, self._i('dlon')],
+                        self.index[i, self._i('right')],
+                        self.index[right_id, self._i('dlon')],
+                        slc[1].start, tie=1)
+            else:
+                lon_end = lon_end_e = 0
+
+            # do top-bot overlaps
+            if id[0] > 0:  # top
+                top_id = self.grid_id2i[id[0] - 1, id[1]]
+                lat_start, lat_start_e = self._calc_overlap(
+                        self.index[i, self._i('top')],
+                        self.index[i, self._i('dlat')],
+                        self.index[top_id, self._i('bottom')],
+                        self.index[top_id, self._i('dlat')],
+                        slc[0].start, tie=0)
+            else:
+                lat_start = lat_start_e = 0
+            if id[0] < (self.grid_id2i.shape[0] - 1):  # bottom
+                bot_id = self.grid_id2i[id[0] + 1, id[1]]
+                lat_end, lat_end_e = self._calc_overlap(
+                        self.index[bot_id, self._i('top')],
+                        self.index[i, self._i('dlat')],
+                        self.index[i, self._i('bottom')],
+                        self.index[bot_id, self._i('dlat')],
+                        slc[0].start, tie=1)
+            else:
+                lat_end = lat_end_e = 0
+
+            self.grid_slice_unique.append((
+                slice(slc[0].start + lat_start, slc[0].stop - lat_end),
+                slice(slc[1].start + lon_start, slc[1].stop - lon_end)))
+
+            # Figure out where to get edge data from
+            #edge_data = {'left': (slc[0], slice(0), 'right': None, 'top': None, 'bottom': None}
+
 
     def process_elevation(self, indices=None):
         # TODO: Also find max, mean, and min elevation on edges
@@ -243,7 +331,10 @@ class ProcessManager(tl.HasTraits):
         # initialize zarr output
         out_uca = os.path.join(self.out_path, 'uca')
         zf = zarr.open(out_uca, shape=self.grid_size_tot, chunk=self.grid_chunk, mode='a')
-        # Also initialize done and todo, on the overlap space
+        out_edge_done = os.path.join(self.out_path, 'edge_done')
+        zf = zarr.open(out_edge_done, shape=self.grid_size_tot, chunk=self.grid_chunk, mode='a', dtype=np.bool)
+        out_edge_todo = os.path.join(self.out_path, 'edge_todo')
+        zf = zarr.open(out_edge_todo, shape=self.grid_size_tot, chunk=self.grid_chunk, mode='a', dtype=np.bool)
 
         # populate kwds
         kwds = [dict(fn=self.elev_source_files[i],
