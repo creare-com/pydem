@@ -227,9 +227,9 @@ class ProcessManager(tl.HasTraits):
         n_overlap_b = 2
         '''
         n_overlap_a = int(np.round(((b - a) / da + tie - 0.01) / 2))
-        n_overlap_a = max(n_overlap_a, 0)
+        n_overlap_a = max(n_overlap_a, 1)
         n_overlap_b = int(np.round(((b - a) / db + 1 - tie - 0.01) / 2))
-        n_overlap_b = max(n_overlap_b, 0)
+        n_overlap_b = max(n_overlap_b, 1)
         return n_overlap_a, n_overlap_b
 
     def compute_grid_overlaps(self):
@@ -291,7 +291,34 @@ class ProcessManager(tl.HasTraits):
                 slice(slc[1].start + lon_start, slc[1].stop - lon_end)))
 
             # Figure out where to get edge data from
-            #edge_data = {'left': (slc[0], slice(0), 'right': None, 'top': None, 'bottom': None}
+            edge_data = {
+                    'left': (slc[0], slc[1].start - lon_start_e),
+                    'right': (slc[0], slc[1].stop + lon_end_e - 1),
+                    'top': (slc[0].start - lat_start_e, slc[1]),
+                    'bottom': (slc[0].stop + lat_end_e - 1, slc[1]),
+                        }
+            self.edge_data.append(edge_data)
+
+        # Figure out size of the non-overlapping arrays
+        self.grid_lat_size_unique = np.array([
+            self.grid_slice_unique[i][0].stop - self.grid_slice_unique[i][0].start 
+            for i in self.grid_id2i[:, 0]])
+        self.grid_lon_size_unique = np.array([
+            self.grid_slice_unique[i][1].stop - self.grid_slice_unique[i][1].start 
+            for i in self.grid_id2i[0, :]])
+
+        # Figure out the slices for the non-overlapping arrays
+        grid_lat_size_cumulative = np.concatenate([[0], self.grid_lat_size_unique.cumsum()])
+        grid_lon_size_cumulative = np.concatenate([[0], self.grid_lon_size_unique.cumsum()])
+        grid_slice = []
+        for i in range(self.n_inputs):
+            ii = self.grid_id[i, 0]
+            jj = self.grid_id[i, 1]
+            slc = (slice(grid_lat_size_cumulative[ii], grid_lat_size_cumulative[ii + 1]),
+                   slice(grid_lon_size_cumulative[jj], grid_lon_size_cumulative[jj + 1]))
+            grid_slice.append(slc)
+
+        self.grid_slice_noverlap = grid_slice
 
 
     def process_elevation(self, indices=None):
