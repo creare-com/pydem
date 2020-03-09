@@ -1,7 +1,5 @@
 # -*- coding: utf-8 -*-
 # NOTES
-# TODO: Resolve any overlaps between files. Basically no changes for slope/aspect elev,
-#       but uca and twi we figure out the unique tiles and construct the whole thing that way
 # TODO: Edge resolution and population
 
 import os
@@ -46,7 +44,7 @@ def calc_aspect_slope(fn, out_fn_aspect, out_fn_slope, out_fn, out_slice):
         return (0, fn + ':' + str(e))
     return (1, "{}: success".format(fn))
 
-def calc_uca(fn, out_fn_uca, out_fn, out_slice):
+def calc_uca(fn, out_fn_uca, out_fn_todo, out_fn_done, out_fn, out_slice):
     try:
         kwargs = dem_processor_from_raster_kwargs(fn)
         kwargs['elev'] = zarr.open(out_fn, mode='a')['elev'][out_slice]
@@ -57,12 +55,20 @@ def calc_uca(fn, out_fn_uca, out_fn, out_slice):
         dp.find_flats()
         dp.calc_uca()
         save_result(dp.uca.astype(np.float32), out_fn_uca, out_slice)
+        save_result(dp.edge_todo.astype(np.bool), out_fn_todo, out_slice, _test_bool)
+        save_result(dp.edge_done.astype(np.bool), out_fn_done, out_slice, _test_bool)
     except Exception as e:
         return (0, fn + ':' + str(e))
     return (1, "{}: success".format(fn))
 
+def _test_float(a, b):
+    return np.any(np.abs(a - b) > 1e-8)
 
-def save_result(result, out_fn, out_slice):
+
+def _test_bool(a, b):
+    return np.any(a != b)
+
+def save_result(result, out_fn, out_slice, test_func=_test_float):
     # save the results
     outstr = ''
     zf = zarr.open(out_fn, mode='a')
@@ -72,7 +78,7 @@ def save_result(result, out_fn, out_slice):
         outstr += out_fn + '\n' + str(e)
     # verify in case another process overwrote my changes
     count = 0
-    while np.any(np.abs(result - zf[out_slice]) > 1e-8):
+    while test_func(zf[out_slice], result):
         # try again
         try: 
             zf[out_slice] = result
@@ -227,9 +233,9 @@ class ProcessManager(tl.HasTraits):
         n_overlap_b = 2
         '''
         n_overlap_a = int(np.round(((b - a) / da + tie - 0.01) / 2))
-        n_overlap_a = max(n_overlap_a, 1)
+        n_overlap_a = max(n_overlap_a, 1)  # max with 1 deals with the zero-overlap case
         n_overlap_b = int(np.round(((b - a) / db + 1 - tie - 0.01) / 2))
-        n_overlap_b = max(n_overlap_b, 1)
+        n_overlap_b = max(n_overlap_b, 1)  # max with 1 deals with the zero-overlap case
         return n_overlap_a, n_overlap_b
 
     def compute_grid_overlaps(self):
@@ -366,6 +372,8 @@ class ProcessManager(tl.HasTraits):
         # populate kwds
         kwds = [dict(fn=self.elev_source_files[i],
                      out_fn_uca=out_uca,
+                     out_fn_todo=out_edge_todo,
+                     out_fn_done=out_edge_done,
                      out_fn=self.out_path,
                      out_slice=self.grid_slice[i])
                 for i in range(self.n_inputs)]
