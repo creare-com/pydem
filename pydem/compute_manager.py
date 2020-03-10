@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 # NOTES
-# TODO: Edge resolution and population
+# TODO: Keep track of success in metadata so we don't recompuet
+# TODO: Make the edge resolution computation much, much smarter
 
 import os
 import traceback
@@ -27,7 +28,7 @@ def calc_elev_cond(fn, out_fn, out_slice):
         elev = dp.elev.astype(np.float32)
         save_result(elev, out_fn, out_slice)
     except Exception as e:
-        return (0, fn + ':' + str(e))
+        return (0, fn + ':' + traceback.format_exc())
     return (1, "{}: success".format(fn))
 
 def calc_aspect_slope(fn, out_fn_aspect, out_fn_slope, out_fn, out_slice):
@@ -41,7 +42,7 @@ def calc_aspect_slope(fn, out_fn_aspect, out_fn_slope, out_fn, out_slice):
         save_result(dp.direction.astype(np.float32), out_fn_aspect, out_slice)
         save_result(dp.mag.astype(np.float32), out_fn_slope, out_slice)
     except Exception as e:
-        return (0, fn + ':' + str(e))
+        return (0, fn + ':' + traceback.format_exc())
     return (1, "{}: success".format(fn))
 
 def calc_uca(fn, out_fn_uca, out_fn_todo, out_fn_done, out_fn, out_slice):
@@ -58,12 +59,47 @@ def calc_uca(fn, out_fn_uca, out_fn_todo, out_fn_done, out_fn, out_slice):
         save_result(dp.edge_todo.astype(np.bool), out_fn_todo, out_slice, _test_bool)
         save_result(dp.edge_done.astype(np.bool), out_fn_done, out_slice, _test_bool)
     except Exception as e:
-        return (0, fn + ':' + str(e))
+        return (0, fn + ':' + traceback.format_exc())
+    return (1, "{}: success".format(fn))
+
+EDGE_SLICES = {
+        'left': (slice(0, None), 0),
+        'right': (slice(0, None), -1),
+        'top' : (0, slice(0, None)),
+        'bottom' : (-1, slice(0, None))
+        }
+
+def calc_uca_ec(fn, out_fn_uca, out_fn_uca_i, out_fn_todo, out_fn_done, out_fn, out_slice, edge_slice):
+    #if 1:
+    try:
+        kwargs = dem_processor_from_raster_kwargs(fn)
+        kwargs['elev'] = zarr.open(out_fn, mode='a')['elev'][out_slice]
+        kwargs['direction'] = zarr.open(out_fn, mode='r')['aspect'][out_slice]
+        kwargs['mag'] = zarr.open(out_fn, mode='a')['slope'][out_slice]
+        kwargs['fill_flats'] = False  # assuming we already did this
+        dp = DEMProcessor(**kwargs)
+        dp.find_flats()
+
+        # get the initial UCA
+        uca_init = zarr.open(out_fn_uca, mode='a')[out_slice]
+        if np.all(uca_init == 0):
+            uca_init = zarr.open(out_fn_uca_i, mode='a')[out_slice]
+
+        # get the edge data
+        edge_init_data = {key: zarr.open(out_fn_uca, mode='a')[edge_slice[key]] for key in edge_slice.keys()}
+        edge_init_done = {key: zarr.open(out_fn_done, mode='a')[edge_slice[key]] for key in edge_slice.keys()}
+        edge_init_todo = {key: zarr.open(out_fn_todo, mode='a')[out_slice][EDGE_SLICES[key]] for key in edge_slice.keys()}
+
+        dp.calc_uca(uca_init=uca_init, edge_init_data=[edge_init_data, edge_init_done, edge_init_todo])
+        save_result(dp.uca.astype(np.float32), out_fn_uca, out_slice)
+        save_result(dp.edge_todo.astype(np.bool), out_fn_todo, out_slice, _test_bool)
+        save_result(dp.edge_done.astype(np.bool), out_fn_done, out_slice, _test_bool)
+    except Exception as e:
+        return (0, fn + ':' + traceback.format_exc())
     return (1, "{}: success".format(fn))
 
 def _test_float(a, b):
     return np.any(np.abs(a - b) > 1e-8)
-
 
 def _test_bool(a, b):
     return np.any(a != b)
@@ -75,7 +111,7 @@ def save_result(result, out_fn, out_slice, test_func=_test_float):
     try:
         zf[out_slice] = result
     except Exception as e:
-        outstr += out_fn + '\n' + str(e)
+        outstr += out_fn + '\n' + traceback.format_exc()
     # verify in case another process overwrote my changes
     count = 0
     while test_func(zf[out_slice], result):
@@ -83,7 +119,7 @@ def save_result(result, out_fn, out_slice, test_func=_test_float):
         try: 
             zf[out_slice] = result
         except Exception as e:
-            outstr += ':' + out_fn + '\n' + str(e)
+            outstr += ':' + out_fn + '\n' + traceback.format_exc()
         count += 1
         if count > 5:
             outstr += ':' + out_fn + '\n' + 'OUTPUT IS NOT CORRECTLY WRITTEN TO FILE'
@@ -331,7 +367,7 @@ class ProcessManager(tl.HasTraits):
         # TODO: Also find max, mean, and min elevation on edges
         # initialize zarr output
         out_file = os.path.join(self.out_path, 'elev')
-        zf = zarr.open(out_file, shape=self.grid_size_tot, chunk=self.grid_chunk, mode='a')
+        zf = zarr.open(out_file, shape=self.grid_size_tot, chunk=self.grid_chunk, mode='a', dtype=np.float32)
 
         # populate kwds
         kwds = [dict(fn=self.elev_source_files[i],
@@ -345,9 +381,9 @@ class ProcessManager(tl.HasTraits):
     def process_aspect_slope(self):
         # initialize zarr output
         out_aspect = os.path.join(self.out_path, 'aspect')
-        zf = zarr.open(out_aspect, shape=self.grid_size_tot, chunk=self.grid_chunk, mode='a')
+        zf = zarr.open(out_aspect, shape=self.grid_size_tot, chunk=self.grid_chunk, mode='a', dtype=np.float32)
         out_slope = os.path.join(self.out_path, 'slope')
-        zf = zarr.open(out_slope, shape=self.grid_size_tot, chunk=self.grid_chunk, mode='a')
+        zf = zarr.open(out_slope, shape=self.grid_size_tot, chunk=self.grid_chunk, mode='a', dtype=np.float32)
 
         # populate kwds
         kwds = [dict(fn=self.elev_source_files[i],
@@ -363,7 +399,7 @@ class ProcessManager(tl.HasTraits):
     def process_uca(self):
         # initialize zarr output
         out_uca = os.path.join(self.out_path, 'uca')
-        zf = zarr.open(out_uca, shape=self.grid_size_tot, chunk=self.grid_chunk, mode='a')
+        zf = zarr.open(out_uca, shape=self.grid_size_tot, chunk=self.grid_chunk, mode='a', dtype=np.float32)
         out_edge_done = os.path.join(self.out_path, 'edge_done')
         zf = zarr.open(out_edge_done, shape=self.grid_size_tot, chunk=self.grid_chunk, mode='a', dtype=np.bool)
         out_edge_todo = os.path.join(self.out_path, 'edge_todo')
@@ -378,13 +414,33 @@ class ProcessManager(tl.HasTraits):
                      out_slice=self.grid_slice[i])
                 for i in range(self.n_inputs)]
 
-        success = self.queue_processes(calc_uca, kwds)
+        success = self.queue_processes(calc_uca, kwds, intermediate_fun=self.compute_grid_overlaps)
         return success
 
     def process_uca_edges(self):
-        pass
+        out_uca_i = os.path.join(self.out_path, 'uca')
+        out_uca = os.path.join(self.out_path, 'uca_corrected')
+        zf = zarr.open(out_uca, shape=self.grid_size_tot,
+                chunk=self.grid_chunk, mode='a', dtype=np.float32,
+                fill_value=0)
+        out_edge_done = os.path.join(self.out_path, 'edge_done')
+        out_edge_todo = os.path.join(self.out_path, 'edge_todo')
+        
+        # populate kwds
+        kwds = [dict(fn=self.elev_source_files[i],
+                     out_fn_uca=out_uca,
+                     out_fn_uca_i=out_uca_i,
+                     out_fn_todo=out_edge_todo,
+                     out_fn_done=out_edge_done,
+                     out_fn=self.out_path,
+                     out_slice=self.grid_slice[i],
+                     edge_slice=self.edge_data[i])
+                for i in range(self.n_inputs)]
 
-    def queue_processes(self, function, kwds, indices=None):
+        success = self.queue_processes(calc_uca_ec, kwds)
+        return success
+
+    def queue_processes(self, function, kwds, indices=None, intermediate_fun=lambda:None):
         # initialize indices if not created
         if indices is None:
             indices = np.ones(self.n_inputs, bool)
@@ -400,6 +456,9 @@ class ProcessManager(tl.HasTraits):
                 for i in range(self.n_inputs) if indices[i]]
         print(" waiting for computation")
         pool.close()  # prevent new tasks from being submitted
+
+        intermediate_fun()
+
         pool.join()   # wait for tasks to finish
         
         success = [r.get(timeout=0.0001) for r in res]
@@ -411,3 +470,4 @@ class ProcessManager(tl.HasTraits):
         self.process_elevation()
         self.process_aspect_slope()
         self.process_uca()
+        self.process_uca_edges()
