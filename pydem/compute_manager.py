@@ -2,6 +2,8 @@
 # NOTES
 # TODO: Keep track of success in metadata so we don't recompuet
 # TODO: Make the edge resolution computation much, much smarter
+# TODO: Clean up filenames -- should be attributes of class
+# TODO: Make a final seamless result with no overlaps -- option to save out to GeoTIFF, and quantize data for cheaper storage
 
 import os
 import traceback
@@ -368,14 +370,16 @@ class ProcessManager(tl.HasTraits):
         # initialize zarr output
         out_file = os.path.join(self.out_path, 'elev')
         zf = zarr.open(out_file, shape=self.grid_size_tot, chunk=self.grid_chunk, mode='a', dtype=np.float32)
+        out_file_success = os.path.join(self.out_path, 'success')
+        success = zarr.open(out_file_success, shape=(self.n_inputs, 4), mode='a', dtype=bool)
 
         # populate kwds
         kwds = [dict(fn=self.elev_source_files[i],
                      out_fn=out_file, out_slice=self.grid_slice[i])
                 for i in range(self.n_inputs)]
 
-        # TODO: Save this to prevent recomputation
-        success = self.queue_processes(calc_elev_cond, kwds)
+        success = self.queue_processes(calc_elev_cond, kwds, success[:, 0])
+        self.out_file['success'][:, 0] = success
         return success
 
     def process_aspect_slope(self):
@@ -383,7 +387,7 @@ class ProcessManager(tl.HasTraits):
         out_aspect = os.path.join(self.out_path, 'aspect')
         zf = zarr.open(out_aspect, shape=self.grid_size_tot, chunk=self.grid_chunk, mode='a', dtype=np.float32)
         out_slope = os.path.join(self.out_path, 'slope')
-        zf = zarr.open(out_slope, shape=self.grid_size_tot, chunk=self.grid_chunk, mode='a', dtype=np.float32)
+        zf1 = zarr.open(out_slope, shape=self.grid_size_tot, chunk=self.grid_chunk, mode='a', dtype=np.float32)
 
         # populate kwds
         kwds = [dict(fn=self.elev_source_files[i],
@@ -393,7 +397,8 @@ class ProcessManager(tl.HasTraits):
                      out_slice=self.grid_slice[i])
                 for i in range(self.n_inputs)]
 
-        success = self.queue_processes(calc_aspect_slope, kwds)
+        success = self.queue_processes(calc_aspect_slope, kwds, success=self.out_file['success'][:, 1])
+        self.out_file['success'][:, 1] = success
         return success
 
     def process_uca(self):
@@ -401,9 +406,9 @@ class ProcessManager(tl.HasTraits):
         out_uca = os.path.join(self.out_path, 'uca')
         zf = zarr.open(out_uca, shape=self.grid_size_tot, chunk=self.grid_chunk, mode='a', dtype=np.float32)
         out_edge_done = os.path.join(self.out_path, 'edge_done')
-        zf = zarr.open(out_edge_done, shape=self.grid_size_tot, chunk=self.grid_chunk, mode='a', dtype=np.bool)
+        zf1 = zarr.open(out_edge_done, shape=self.grid_size_tot, chunk=self.grid_chunk, mode='a', dtype=np.bool)
         out_edge_todo = os.path.join(self.out_path, 'edge_todo')
-        zf = zarr.open(out_edge_todo, shape=self.grid_size_tot, chunk=self.grid_chunk, mode='a', dtype=np.bool)
+        zf2 = zarr.open(out_edge_todo, shape=self.grid_size_tot, chunk=self.grid_chunk, mode='a', dtype=np.bool)
 
         # populate kwds
         kwds = [dict(fn=self.elev_source_files[i],
@@ -414,7 +419,9 @@ class ProcessManager(tl.HasTraits):
                      out_slice=self.grid_slice[i])
                 for i in range(self.n_inputs)]
 
-        success = self.queue_processes(calc_uca, kwds, intermediate_fun=self.compute_grid_overlaps)
+        success = self.queue_processes(calc_uca, kwds, success=self.out_file['success'][:, 2],
+                intermediate_fun=self.compute_grid_overlaps)
+        self.out_file['success'][:, 2] = success
         return success
 
     def process_uca_edges(self):
@@ -437,13 +444,14 @@ class ProcessManager(tl.HasTraits):
                      edge_slice=self.edge_data[i])
                 for i in range(self.n_inputs)]
 
-        success = self.queue_processes(calc_uca_ec, kwds)
+        success = self.queue_processes(calc_uca_ec, kwds, success=self.out_file['success'][:, 3])
+        self.out_file['success'][:, 3] = success
         return success
 
-    def queue_processes(self, function, kwds, indices=None, intermediate_fun=lambda:None):
-        # initialize indices if not created
-        if indices is None:
-            indices = np.ones(self.n_inputs, bool)
+    def queue_processes(self, function, kwds, success=None, intermediate_fun=lambda:None):
+        # initialize success if not created
+        if success is None:
+            success = [0] * len(res)
 
         # create pool and queue
         pool = Pool(processes=self.n_workers)
@@ -452,22 +460,30 @@ class ProcessManager(tl.HasTraits):
         print ("Sumitting workers", end='...')
         #success = [function(**kwds[i]) 
         #        for i in range(self.n_inputs) if indices[i]]
+
         res = [pool.apply_async(function, kwds=kwds[i]) 
-                for i in range(self.n_inputs) if indices[i]]
+                for i in range(self.n_inputs) if not success[i]]
         print(" waiting for computation")
         pool.close()  # prevent new tasks from being submitted
 
         intermediate_fun()
 
         pool.join()   # wait for tasks to finish
-        
-        success = [r.get(timeout=0.0001) for r in res]
-        print('\n'.join([s[1] for s in success]))
+
+        for i, r in enumerate(res):
+            s = r.get(timeout=0.0001)
+            success[i] = s[0]
+            print(s)
         return success
 
     def process_twi(self):
+        print("Compute Grid")
         self.compute_grid()
+        print("Compute Elevation")
         self.process_elevation()
+        print("Compute Aspect and Slope")
         self.process_aspect_slope()
+        print("Compute UCA")
         self.process_uca()
+        print("Compute UCA Corrections")
         self.process_uca_edges()
