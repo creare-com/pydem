@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
 # NOTES
-# TODO: Keep track of success in metadata so we don't recompuet
 # TODO: Make the edge resolution computation much, much smarter
 # TODO: Clean up filenames -- should be attributes of class
 # TODO: Make a final seamless result with no overlaps -- option to save out to GeoTIFF, and quantize data for cheaper storage
@@ -70,6 +69,26 @@ EDGE_SLICES = {
         'top' : (0, slice(0, None)),
         'bottom' : (-1, slice(0, None))
         }
+
+def calc_uca_ec_metrics(fn_uca, fn_done, fn_todo, slc, edge_slc):
+        # get the edge data
+        edge_data = [zarr.open(fn_uca, mode='a')[edge_slc[key]] for key in edge_slc.keys()]
+        edge_done = [zarr.open(fn_done, mode='a')[edge_slc[key]]
+                for key in edge_slc.keys()]
+        edge_todo = [zarr.open(fn_todo, mode='a')[slc][EDGE_SLICES[key]]
+                for key in edge_slc.keys()]
+        n_coulddo = 0
+        p_done = 0
+        n_done = 0
+        for ed, et, edn in zip(edge_data, edge_todo, edge_done):
+            # coulddo_ = et & (ed > 0)  # previously
+            coulddo = et & edn
+            n_done += (coulddo).sum()
+            p_done += et.sum()
+            #n_coulddo += coulddo_.sum()
+        p_done = n_done / (1e-16 + p_done)
+        # return (n_coulddo, p_done, n_done)
+        return [(p_done, n_done)]
 
 def calc_uca_ec(fn, out_fn_uca, out_fn_uca_i, out_fn_todo, out_fn_done, out_fn, out_slice, edge_slice):
     #if 1:
@@ -424,6 +443,28 @@ class ProcessManager(tl.HasTraits):
         self.out_file['success'][:, 2] = success
         return success
 
+    def update_uca_edge_metrics(self, out_uca=None):
+        if out_uca is None:
+           out_uca = os.path.join(self.out_path, 'uca')
+        out_edge_done = os.path.join(self.out_path, 'edge_done')
+        out_edge_todo = os.path.join(self.out_path, 'edge_todo')
+        out_metrics = os.path.join(self.out_path, 'uca_edge_metrics')
+        zf = zarr.open(out_metrics, shape=(self.n_inputs, 2),
+                mode='a', dtype=np.float32,
+                fill_value=0)
+
+        kwds = [dict(
+                     fn_uca=out_uca,
+                     fn_done=out_edge_done,
+                     fn_todo=out_edge_todo,
+                     slc=self.grid_slice[i],
+                     edge_slc=self.edge_data[i])
+                for i in range(self.n_inputs)]
+
+        metrics = self.queue_processes(calc_uca_ec_metrics, kwds)
+        zf[:] = np.array(metrics)
+        return zf[:]
+
     def process_uca_edges(self):
         out_uca_i = os.path.join(self.out_path, 'uca')
         out_uca = os.path.join(self.out_path, 'uca_corrected')
@@ -451,7 +492,7 @@ class ProcessManager(tl.HasTraits):
     def queue_processes(self, function, kwds, success=None, intermediate_fun=lambda:None):
         # initialize success if not created
         if success is None:
-            success = [0] * len(res)
+            success = [0] * self.n_inputs 
 
         # create pool and queue
         pool = Pool(processes=self.n_workers)
@@ -464,6 +505,7 @@ class ProcessManager(tl.HasTraits):
         res = [pool.apply_async(function, kwds=kwds[i]) 
                 for i in range(self.n_inputs) if not success[i]]
         print(" waiting for computation")
+
         pool.close()  # prevent new tasks from being submitted
 
         intermediate_fun()
@@ -486,4 +528,4 @@ class ProcessManager(tl.HasTraits):
         print("Compute UCA")
         self.process_uca()
         print("Compute UCA Corrections")
-        self.process_uca_edges()
+        #self.process_uca_edges()
