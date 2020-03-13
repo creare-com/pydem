@@ -7,6 +7,7 @@
 import os
 import traceback
 import subprocess
+import time
 import numpy as np
 import zarr
 import scipy.interpolate as spinterp
@@ -17,6 +18,7 @@ import rasterio
 from multiprocessing import Queue
 from multiprocessing import Process
 from multiprocessing.pool import Pool
+from multiprocessing.context import TimeoutError as mpTimeoutError
 
 from .dem_processing import DEMProcessor
 from .utils import parse_fn, sortrows, save_raster, read_raster, dem_processor_from_raster_kwargs
@@ -388,7 +390,7 @@ class ProcessManager(tl.HasTraits):
         # TODO: Also find max, mean, and min elevation on edges
         # initialize zarr output
         out_file = os.path.join(self.out_path, 'elev')
-        zf = zarr.open(out_file, shape=self.grid_size_tot, chunk=self.grid_chunk, mode='a', dtype=np.float32)
+        zf = zarr.open(out_file, shape=self.grid_size_tot, chunks=self.grid_chunk, mode='a', dtype=np.float32)
         out_file_success = os.path.join(self.out_path, 'success')
         success = zarr.open(out_file_success, shape=(self.n_inputs, 4), mode='a', dtype=bool)
 
@@ -404,9 +406,9 @@ class ProcessManager(tl.HasTraits):
     def process_aspect_slope(self):
         # initialize zarr output
         out_aspect = os.path.join(self.out_path, 'aspect')
-        zf = zarr.open(out_aspect, shape=self.grid_size_tot, chunk=self.grid_chunk, mode='a', dtype=np.float32)
+        zf = zarr.open(out_aspect, shape=self.grid_size_tot, chunks=self.grid_chunk, mode='a', dtype=np.float32)
         out_slope = os.path.join(self.out_path, 'slope')
-        zf1 = zarr.open(out_slope, shape=self.grid_size_tot, chunk=self.grid_chunk, mode='a', dtype=np.float32)
+        zf1 = zarr.open(out_slope, shape=self.grid_size_tot, chunks=self.grid_chunk, mode='a', dtype=np.float32)
 
         # populate kwds
         kwds = [dict(fn=self.elev_source_files[i],
@@ -423,11 +425,11 @@ class ProcessManager(tl.HasTraits):
     def process_uca(self):
         # initialize zarr output
         out_uca = os.path.join(self.out_path, 'uca')
-        zf = zarr.open(out_uca, shape=self.grid_size_tot, chunk=self.grid_chunk, mode='a', dtype=np.float32)
+        zf = zarr.open(out_uca, shape=self.grid_size_tot, chunks=self.grid_chunk, mode='a', dtype=np.float32)
         out_edge_done = os.path.join(self.out_path, 'edge_done')
-        zf1 = zarr.open(out_edge_done, shape=self.grid_size_tot, chunk=self.grid_chunk, mode='a', dtype=np.bool)
+        zf1 = zarr.open(out_edge_done, shape=self.grid_size_tot, chunks=self.grid_chunk, mode='a', dtype=np.bool)
         out_edge_todo = os.path.join(self.out_path, 'edge_todo')
-        zf2 = zarr.open(out_edge_todo, shape=self.grid_size_tot, chunk=self.grid_chunk, mode='a', dtype=np.bool)
+        zf2 = zarr.open(out_edge_todo, shape=self.grid_size_tot, chunks=self.grid_chunk, mode='a', dtype=np.bool)
 
         # populate kwds
         kwds = [dict(fn=self.elev_source_files[i],
@@ -443,9 +445,13 @@ class ProcessManager(tl.HasTraits):
         self.out_file['success'][:, 2] = success
         return success
 
-    def update_uca_edge_metrics(self, out_uca=None):
+    def update_uca_edge_metrics(self, out_uca=None, index=None):
+        if index is None:
+            index = range(self.n_inputs) 
         if out_uca is None:
            out_uca = os.path.join(self.out_path, 'uca')
+        else:
+            out_uca = os.path.join(self.out_path, out_uca)
         out_edge_done = os.path.join(self.out_path, 'edge_done')
         out_edge_todo = os.path.join(self.out_path, 'edge_todo')
         out_metrics = os.path.join(self.out_path, 'uca_edge_metrics')
@@ -459,17 +465,18 @@ class ProcessManager(tl.HasTraits):
                      fn_todo=out_edge_todo,
                      slc=self.grid_slice[i],
                      edge_slc=self.edge_data[i])
-                for i in range(self.n_inputs)]
+                for i in index]
 
         metrics = self.queue_processes(calc_uca_ec_metrics, kwds)
-        zf[:] = np.array(metrics)
+        for i, ind in enumerate(index):
+            zf[ind] = metrics[i]
         return zf[:]
 
     def process_uca_edges(self):
         out_uca_i = os.path.join(self.out_path, 'uca')
         out_uca = os.path.join(self.out_path, 'uca_corrected')
         zf = zarr.open(out_uca, shape=self.grid_size_tot,
-                chunk=self.grid_chunk, mode='a', dtype=np.float32,
+                chunks=self.grid_chunk, mode='a', dtype=np.float32,
                 fill_value=0)
         out_edge_done = os.path.join(self.out_path, 'edge_done')
         out_edge_todo = os.path.join(self.out_path, 'edge_todo')
@@ -484,15 +491,64 @@ class ProcessManager(tl.HasTraits):
                      out_slice=self.grid_slice[i],
                      edge_slice=self.edge_data[i])
                 for i in range(self.n_inputs)]
+        # update metrics and decide who goes first
+        mets = self.update_uca_edge_metrics('uca')
+        I = np.argpartition(-mets[:, 0], self.n_workers * 2)
 
-        success = self.queue_processes(calc_uca_ec, kwds, success=self.out_file['success'][:, 3])
-        self.out_file['success'][:, 3] = success
-        return success
+        # create pool and queue
+        pool = Pool(processes=self.n_workers)
+
+        # submit workers
+        active = I[:self.n_workers * 2].tolist()
+        active = [a for a in active if mets[a, 0] > 0]
+        res = [pool.apply_async(calc_uca_ec, kwds=kwds[i]) for i in active] 
+        print ("Starting with {}".format(active))
+        while res:
+            # monitor and submit new workers as needed
+            finished = []
+            finished_res = []
+            for i, r in enumerate(res):
+                try: 
+                    s = r.get(timeout=0.001)
+                    finished.append(active[i])
+                    finished_res.append(i)
+                    print(s)
+                except (mpTimeoutError, TimeoutError) as e:
+                    print(e)
+                    pass
+            if not finished: continue
+            active = [a for a in active if a not in finished]
+            res = [r for i, r in enumerate(res) if i not in finished_res]
+            check_met_inds = []
+            for f in finished:
+                i, j, k = self.grid_id[f]
+                check_met_inds.append(f)
+                # left
+                if j > 0: check_met_inds.append(self.grid_id2i[i, j-1])
+                # right
+                if j < self.grid_id2i.shape[1] - 1: check_met_inds.append(self.grid_id2i[i, j+1])
+                # top
+                if i > 0: check_met_inds.append(self.grid_id2i[i-1, j])
+                # bottom
+                if i < self.grid_id2i.shape[0] - 1: check_met_inds.append(self.grid_id2i[i+1, j])
+            mets = self.update_uca_edge_metrics('uca_corrected', check_met_inds)
+            I = np.argpartition(-mets[:, 0], self.n_workers * 2)
+            candidates = I[:self.n_workers * 2].tolist()
+            candidates = [c for c in candidates if c not in active and mets[c, 0] > 0][:len(finished)]
+            res.extend([pool.apply_async(calc_uca_ec, kwds=kwds[i]) for i in candidates])
+            active.extend(candidates)
+            print ("Added {}, active {}".format(candidates, active))
+            time.sleep(1)
+        pool.close()
+        pool.join()
+
+        mets = self.update_uca_edge_metrics('uca_corrected')
+        return mets
 
     def queue_processes(self, function, kwds, success=None, intermediate_fun=lambda:None):
         # initialize success if not created
         if success is None:
-            success = [0] * self.n_inputs 
+            success = [0] * len(kwds) 
 
         # create pool and queue
         pool = Pool(processes=self.n_workers)
@@ -502,8 +558,8 @@ class ProcessManager(tl.HasTraits):
         #success = [function(**kwds[i]) 
         #        for i in range(self.n_inputs) if indices[i]]
 
-        res = [pool.apply_async(function, kwds=kwds[i]) 
-                for i in range(self.n_inputs) if not success[i]]
+        res = [pool.apply_async(function, kwds=kwd) 
+                for i, kwd in enumerate(kwds) if not success[i]]
         print(" waiting for computation")
 
         pool.close()  # prevent new tasks from being submitted
@@ -528,4 +584,4 @@ class ProcessManager(tl.HasTraits):
         print("Compute UCA")
         self.process_uca()
         print("Compute UCA Corrections")
-        #self.process_uca_edges()
+        self.process_uca_edges()
