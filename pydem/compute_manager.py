@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 # NOTES
-# TODO: Make the edge resolution computation much, much smarter
+# TODO: Fix edge resolution top-bottom bug
+# TODO: Ensure that 'success' is written out to a file. 
 # TODO: Clean up filenames -- should be attributes of class
 # TODO: Make a final seamless result with no overlaps -- option to save out to GeoTIFF, and quantize data for cheaper storage
 
@@ -92,7 +93,7 @@ def calc_uca_ec_metrics(fn_uca, fn_done, fn_todo, slc, edge_slc):
         # return (n_coulddo, p_done, n_done)
         return [(p_done, n_done)]
 
-def calc_uca_ec(fn, out_fn_uca, out_fn_uca_i, out_fn_todo, out_fn_done, out_fn, out_slice, edge_slice):
+def calc_uca_ec(fn, out_fn_uca, out_fn_todo, out_fn_done, out_fn, out_slice, edge_slice):
     #if 1:
     try:
         kwargs = dem_processor_from_raster_kwargs(fn)
@@ -104,14 +105,15 @@ def calc_uca_ec(fn, out_fn_uca, out_fn_uca_i, out_fn_todo, out_fn_done, out_fn, 
         dp.find_flats()
 
         # get the initial UCA
-        uca_init = zarr.open(out_fn_uca, mode='a')[out_slice]
-        if np.all(uca_init == 0):
-            uca_init = zarr.open(out_fn_uca_i, mode='a')[out_slice]
+        uca_file = zarr.open(out_fn_uca, mode='a')
+        uca_init = uca_file[out_slice]
+        done_file = zarr.open(out_fn_done, mode='a')
+        todo_file = zarr.open(out_fn_todo, mode='a')
 
         # get the edge data
-        edge_init_data = {key: zarr.open(out_fn_uca, mode='a')[edge_slice[key]] for key in edge_slice.keys()}
-        edge_init_done = {key: zarr.open(out_fn_done, mode='a')[edge_slice[key]] for key in edge_slice.keys()}
-        edge_init_todo = {key: zarr.open(out_fn_todo, mode='a')[out_slice][EDGE_SLICES[key]] for key in edge_slice.keys()}
+        edge_init_data = {key: uca_file[edge_slice[key]] for key in edge_slice.keys()}
+        edge_init_done = {key: done_file[edge_slice[key]] for key in edge_slice.keys()}
+        edge_init_todo = {key: todo_file[out_slice][EDGE_SLICES[key]] for key in edge_slice.keys()}
 
         dp.calc_uca(uca_init=uca_init, edge_init_data=[edge_init_data, edge_init_done, edge_init_todo])
         save_result(dp.uca.astype(np.float32), out_fn_uca, out_slice)
@@ -425,7 +427,8 @@ class ProcessManager(tl.HasTraits):
     def process_uca(self):
         # initialize zarr output
         out_uca = os.path.join(self.out_path, 'uca')
-        zf = zarr.open(out_uca, shape=self.grid_size_tot, chunks=self.grid_chunk, mode='a', dtype=np.float32)
+        zf = zarr.open(out_uca, shape=self.grid_size_tot, chunks=self.grid_chunk, mode='a',
+                dtype=np.float32)
         out_edge_done = os.path.join(self.out_path, 'edge_done')
         zf1 = zarr.open(out_edge_done, shape=self.grid_size_tot, chunks=self.grid_chunk, mode='a', dtype=np.bool)
         out_edge_todo = os.path.join(self.out_path, 'edge_todo')
@@ -473,18 +476,13 @@ class ProcessManager(tl.HasTraits):
         return zf[:]
 
     def process_uca_edges(self):
-        out_uca_i = os.path.join(self.out_path, 'uca')
-        out_uca = os.path.join(self.out_path, 'uca_corrected')
-        zf = zarr.open(out_uca, shape=self.grid_size_tot,
-                chunks=self.grid_chunk, mode='a', dtype=np.float32,
-                fill_value=0)
+        out_uca = os.path.join(self.out_path, 'uca')
         out_edge_done = os.path.join(self.out_path, 'edge_done')
         out_edge_todo = os.path.join(self.out_path, 'edge_todo')
         
         # populate kwds
         kwds = [dict(fn=self.elev_source_files[i],
                      out_fn_uca=out_uca,
-                     out_fn_uca_i=out_uca_i,
                      out_fn_todo=out_edge_todo,
                      out_fn_done=out_edge_done,
                      out_fn=self.out_path,
@@ -531,7 +529,7 @@ class ProcessManager(tl.HasTraits):
                 if i > 0: check_met_inds.append(self.grid_id2i[i-1, j])
                 # bottom
                 if i < self.grid_id2i.shape[0] - 1: check_met_inds.append(self.grid_id2i[i+1, j])
-            mets = self.update_uca_edge_metrics('uca_corrected', check_met_inds)
+            mets = self.update_uca_edge_metrics('uca', check_met_inds)
             I = np.argpartition(-mets[:, 0], self.n_workers * 2)
             candidates = I[:self.n_workers * 2].tolist()
             candidates = [c for c in candidates if c not in active and mets[c, 0] > 0][:len(finished)]
@@ -542,7 +540,7 @@ class ProcessManager(tl.HasTraits):
         pool.close()
         pool.join()
 
-        mets = self.update_uca_edge_metrics('uca_corrected')
+        mets = self.update_uca_edge_metrics('uca')
         return mets
 
     def queue_processes(self, function, kwds, success=None, intermediate_fun=lambda:None):
