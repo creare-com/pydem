@@ -211,8 +211,8 @@ class ProcessManager(tl.HasTraits):
     grid_lon_size = tt.Array()
     grid_lat_size_unique = tt.Array()
     grid_lon_size_unique = tt.Array()
-    grid_size_tot = tt.Array()
-    grid_chunk = tt.Array()
+    grid_size_tot = tl.List()
+    grid_chunk = tl.List()
     edge_data = tl.List()
 
 
@@ -269,9 +269,9 @@ class ProcessManager(tl.HasTraits):
         self.grid_shape = grid_shape
         self.grid_lat_size = grid_lat_size
         self.grid_lon_size = grid_lon_size
-        self.grid_size_tot = [grid_lat_size.sum(), grid_lon_size.sum()]
+        self.grid_size_tot = [int(grid_lat_size.sum()), int(grid_lon_size.sum())]
         self.grid_slice = grid_slice
-        self.grid_chunk = [grid_lat_size.min(), grid_lon_size.min()]
+        self.grid_chunk = [int(grid_lat_size.min()), int(grid_lon_size.min())]
 
     def _calc_overlap(self, a, da, b, db, s, tie):
         '''
@@ -312,7 +312,10 @@ class ProcessManager(tl.HasTraits):
             # do left-right overlaps
             if id[1] > 0:  # left
                 left_id = self.grid_id2i[id[0], id[1] - 1]
-                lon_start, lon_start_e = self._calc_overlap(
+                if left_id < 0: 
+                    lon_start = lon_start_e = 0
+                else:
+                    lon_start, lon_start_e = self._calc_overlap(
                         self.index[i, self._i('left')],
                         self.index[i, self._i('dlon')],
                         self.index[left_id, self._i('right')],
@@ -322,7 +325,10 @@ class ProcessManager(tl.HasTraits):
                 lon_start = lon_start_e = 0
             if id[1] < (self.grid_id2i.shape[1] - 1):  # right
                 right_id = self.grid_id2i[id[0], id[1] + 1]
-                lon_end, lon_end_e = self._calc_overlap(
+                if right_id < 0: 
+                    lon_end = lon_end_e = 0
+                else:
+                    lon_end, lon_end_e = self._calc_overlap(
                         self.index[right_id, self._i('left')],
                         self.index[i, self._i('dlon')],
                         self.index[i, self._i('right')],
@@ -334,7 +340,10 @@ class ProcessManager(tl.HasTraits):
             # do top-bot overlaps
             if id[0] > 0:  # top
                 top_id = self.grid_id2i[id[0] - 1, id[1]]
-                lat_start, lat_start_e = self._calc_overlap(
+                if top_id < 0: 
+                    lat_start = lat_start_e = 0
+                else:
+                    lat_start, lat_start_e = self._calc_overlap(
                         self.index[i, self._i('top')],
                         self.index[i, self._i('dlat')],
                         self.index[top_id, self._i('bottom')],
@@ -344,7 +353,10 @@ class ProcessManager(tl.HasTraits):
                 lat_start = lat_start_e = 0
             if id[0] < (self.grid_id2i.shape[0] - 1):  # bottom
                 bot_id = self.grid_id2i[id[0] + 1, id[1]]
-                lat_end, lat_end_e = self._calc_overlap(
+                if bot_id < 0: 
+                    lat_end = lat_end_e = 0
+                else:
+                    lat_end, lat_end_e = self._calc_overlap(
                         self.index[bot_id, self._i('top')],
                         self.index[i, self._i('dlat')],
                         self.index[i, self._i('bottom')],
@@ -547,6 +559,16 @@ class ProcessManager(tl.HasTraits):
         # initialize success if not created
         if success is None:
             success = [0] * len(kwds) 
+
+        if self.n_workers == 1:
+            res = []
+            for i, kwd in enumerate(kwds):
+                if success[i]: continue
+                s = function(**kwd)
+                success[i] = s[0] 
+                print(s)
+            intermediate_fun()
+            return success
 
         # create pool and queue
         pool = Pool(processes=self.n_workers)

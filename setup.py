@@ -47,12 +47,6 @@ extensions = [
               library_dirs=[],
               extra_compile_args=compile_args,
               language='c++'),
-    Extension("pydem.reader.inpaint",
-              [path_reader + sep + "inpaint.pyx"],
-              include_dirs=[np.get_include()],
-              library_dirs=[],
-              extra_compile_args=compile_args,
-              language='c++'),
 ]
 
 setup(
@@ -60,7 +54,7 @@ setup(
 
     name='pyDEM',
 
-    version='0.2.0',
+    version='2.0.0',
 
     description="Software for calculating Topographic Wetness Index (TWI)",
     author='MPU, RXC, JXM',
@@ -81,7 +75,7 @@ setup(
          'License :: OSI Approved :: Apache Software License',
         # Specify the Python versions you support here. In particular, ensure
         # that you indicate whether you support Python 2, Python 3 or both.
-        'Programming Language :: Python :: 2.7',
+        'Programming Language :: Python :: 3',
     ],
     packages=find_packages(),
 
@@ -94,7 +88,8 @@ setup(
         'geopy',
         'traitlets',
         'traittypes',
-        'zarr'
+        'zarray',
+        'cython'
         ],
 
     entry_points = {

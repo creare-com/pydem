@@ -34,8 +34,6 @@ Created on Tue Oct 14 17:25:50 2014
 """
 from geopy.distance import distance
 import os
-import gdal
-import osr
 import re
 
 import numpy as np
