@@ -54,7 +54,7 @@ setup(
 
     name='pyDEM',
 
-    version='2.0.0',
+    version='0.4.0',
 
     description="Software for calculating Topographic Wetness Index (TWI)",
     author='MPU, RXC, JXM',
