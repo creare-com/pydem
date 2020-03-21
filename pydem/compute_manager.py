@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 # NOTES
 # TODO: Fix edge resolution top-bottom bug
-# TODO: Ensure that 'success' is written out to a file. 
+# TODO: Ensure that 'success' is written out to a file.
 # TODO: Clean up filenames -- should be attributes of class
 # TODO: Make a final seamless result with no overlaps -- option to save out to GeoTIFF, and quantize data for cheaper storage
 
@@ -20,9 +20,17 @@ from multiprocessing import Queue
 from multiprocessing import Process
 from multiprocessing.pool import Pool
 from multiprocessing.context import TimeoutError as mpTimeoutError
+# import ipydb
 
 from .dem_processing import DEMProcessor
-from .utils import parse_fn, sortrows, save_raster, read_raster, dem_processor_from_raster_kwargs
+from .utils import dem_processor_from_raster_kwargs
+
+EDGE_SLICES = {
+        'left': (slice(0, None), 0),
+        'right': (slice(0, None), -1),
+        'top' : (0, slice(0, None)),
+        'bottom' : (-1, slice(0, None))
+        }
 
 def calc_elev_cond(fn, out_fn, out_slice):
     try:
@@ -37,7 +45,7 @@ def calc_elev_cond(fn, out_fn, out_slice):
 
 def calc_aspect_slope(fn, out_fn_aspect, out_fn_slope, out_fn, out_slice):
     #if 1:
-    try: 
+    try:
         kwargs = dem_processor_from_raster_kwargs(fn)
         kwargs['elev'] = zarr.open(out_fn, mode='a')['elev'][out_slice]
         kwargs['fill_flats'] = False  # assuming we already did this
@@ -66,13 +74,6 @@ def calc_uca(fn, out_fn_uca, out_fn_todo, out_fn_done, out_fn, out_slice):
         return (0, fn + ':' + traceback.format_exc())
     return (1, "{}: success".format(fn))
 
-EDGE_SLICES = {
-        'left': (slice(0, None), 0),
-        'right': (slice(0, None), -1),
-        'top' : (0, slice(0, None)),
-        'bottom' : (-1, slice(0, None))
-        }
-
 def calc_uca_ec_metrics(fn_uca, fn_done, fn_todo, slc, edge_slc):
         # get the edge data
         edge_data = [zarr.open(fn_uca, mode='a')[edge_slc[key]] for key in edge_slc.keys()]
@@ -80,7 +81,7 @@ def calc_uca_ec_metrics(fn_uca, fn_done, fn_todo, slc, edge_slc):
                 for key in edge_slc.keys()]
         edge_todo = [zarr.open(fn_todo, mode='a')[slc][EDGE_SLICES[key]]
                 for key in edge_slc.keys()]
-        n_coulddo = 0
+        # n_coulddo = 0
         p_done = 0
         n_done = 0
         for ed, et, edn in zip(edge_data, edge_todo, edge_done):
@@ -114,6 +115,12 @@ def calc_uca_ec(fn, out_fn_uca, out_fn_todo, out_fn_done, out_fn, out_slice, edg
         edge_init_data = {key: uca_file[edge_slice[key]] for key in edge_slice.keys()}
         edge_init_done = {key: done_file[edge_slice[key]] for key in edge_slice.keys()}
         edge_init_todo = {key: todo_file[out_slice][EDGE_SLICES[key]] for key in edge_slice.keys()}
+        edge_init_todo_neighbor = {key: todo_file[edge_slice[key]] for key in edge_slice.keys()}
+
+        # fix my TODO if my neitghbor has TODO on the same edge -- that should never happen except for floating point
+        # rounding errors
+        edge_init_todo = {k: v & (edge_init_todo_neighbor[k] == False) for k, v in edge_init_todo.items()}
+
 
         dp.calc_uca(uca_init=uca_init, edge_init_data=[edge_init_data, edge_init_done, edge_init_todo])
         save_result(dp.uca.astype(np.float32), out_fn_uca, out_slice)
@@ -141,7 +148,7 @@ def save_result(result, out_fn, out_slice, test_func=_test_float):
     count = 0
     while test_func(zf[out_slice], result):
         # try again
-        try: 
+        try:
             zf[out_slice] = result
         except Exception as e:
             outstr += ':' + out_fn + '\n' + traceback.format_exc()
@@ -151,6 +158,8 @@ def save_result(result, out_fn, out_slice, test_func=_test_float):
             raise Exception(outstr)
 
 class ProcessManager(tl.HasTraits):
+    _debug = tl.Bool(False)
+
     # Parameters controlling the computation
     grid_round_decimals = tl.Int(2)  # Number of decimals to round the lat/lon to for determining the size of the full dataset
 
@@ -158,7 +167,7 @@ class ProcessManager(tl.HasTraits):
     n_workers = tl.Int(1)
     in_path = tl.Unicode('.')
     out_format = tl.Enum(['zarr'], default_value='zarr')
-    
+
     out_path = tl.Unicode()
     @tl.default('out_path')
     def _out_path_default(self):
@@ -189,7 +198,7 @@ class ProcessManager(tl.HasTraits):
         return ['left', 'bottom', 'right', 'top', 'dlon', 'dlat', 'nrows', 'ncols'].index(name)
 
     # Working attributes
-    index = tt.Array()  # left, bottom, right, top, dlon, dlat, nrows, ncols 
+    index = tt.Array()  # left, bottom, right, top, dlon, dlat, nrows, ncols
     @tl.default('index')
     def compute_index(self):
         index = np.zeros((len(self.elev_source_files), 8))
@@ -206,7 +215,7 @@ class ProcessManager(tl.HasTraits):
     grid_slice = tl.List()
     grid_slice_unique = tl.List()
     grid_slice_noverlap = tl.List()
-    grid_shape = tt.Array()
+    grid_shape = tl.List()
     grid_lat_size = tt.Array()
     grid_lon_size = tt.Array()
     grid_lat_size_unique = tt.Array()
@@ -217,7 +226,7 @@ class ProcessManager(tl.HasTraits):
 
 
     # Properties
-    @property 
+    @property
     def n_inputs(self):
         return len(self.elev_source_files)
 
@@ -235,7 +244,7 @@ class ProcessManager(tl.HasTraits):
         grid_id2i = -np.ones(grid_shape, dtype=int)
         grid_lat_size = np.ones(len(ulats), dtype=int) * -1
         grid_lon_size = np.ones(len(ulons), dtype=int) * -1
-        
+
         # Put the index of filename into the grid, and check that sizes are consistent
         for i in range(self.n_inputs):
             grid_id[i, :2] = [ulats.index(lats[i]), ulons.index(lons[i])]
@@ -312,7 +321,7 @@ class ProcessManager(tl.HasTraits):
             # do left-right overlaps
             if id[1] > 0:  # left
                 left_id = self.grid_id2i[id[0], id[1] - 1]
-                if left_id < 0: 
+                if left_id < 0:
                     lon_start = lon_start_e = 0
                 else:
                     lon_start, lon_start_e = self._calc_overlap(
@@ -323,9 +332,10 @@ class ProcessManager(tl.HasTraits):
                         slc[1].start, tie=0)
             else:
                 lon_start = lon_start_e = 0
+
             if id[1] < (self.grid_id2i.shape[1] - 1):  # right
                 right_id = self.grid_id2i[id[0], id[1] + 1]
-                if right_id < 0: 
+                if right_id < 0:
                     lon_end = lon_end_e = 0
                 else:
                     lon_end, lon_end_e = self._calc_overlap(
@@ -340,7 +350,7 @@ class ProcessManager(tl.HasTraits):
             # do top-bot overlaps
             if id[0] > 0:  # top
                 top_id = self.grid_id2i[id[0] - 1, id[1]]
-                if top_id < 0: 
+                if top_id < 0:
                     lat_start = lat_start_e = 0
                 else:
                     lat_start, lat_start_e = self._calc_overlap(
@@ -353,7 +363,7 @@ class ProcessManager(tl.HasTraits):
                 lat_start = lat_start_e = 0
             if id[0] < (self.grid_id2i.shape[0] - 1):  # bottom
                 bot_id = self.grid_id2i[id[0] + 1, id[1]]
-                if bot_id < 0: 
+                if bot_id < 0:
                     lat_end = lat_end_e = 0
                 else:
                     lat_end, lat_end_e = self._calc_overlap(
@@ -380,10 +390,10 @@ class ProcessManager(tl.HasTraits):
 
         # Figure out size of the non-overlapping arrays
         self.grid_lat_size_unique = np.array([
-            self.grid_slice_unique[i][0].stop - self.grid_slice_unique[i][0].start 
+            self.grid_slice_unique[i][0].stop - self.grid_slice_unique[i][0].start
             for i in self.grid_id2i[:, 0]])
         self.grid_lon_size_unique = np.array([
-            self.grid_slice_unique[i][1].stop - self.grid_slice_unique[i][1].start 
+            self.grid_slice_unique[i][1].stop - self.grid_slice_unique[i][1].start
             for i in self.grid_id2i[0, :]])
 
         # Figure out the slices for the non-overlapping arrays
@@ -398,6 +408,9 @@ class ProcessManager(tl.HasTraits):
             grid_slice.append(slc)
 
         self.grid_slice_noverlap = grid_slice
+
+        def compute_non_overlap_data(self, data, overlaps=[0, 0]):
+            pass
 
 
     def process_elevation(self, indices=None):
@@ -462,7 +475,7 @@ class ProcessManager(tl.HasTraits):
 
     def update_uca_edge_metrics(self, out_uca=None, index=None):
         if index is None:
-            index = range(self.n_inputs) 
+            index = range(self.n_inputs)
         if out_uca is None:
            out_uca = os.path.join(self.out_path, 'uca')
         else:
@@ -491,7 +504,7 @@ class ProcessManager(tl.HasTraits):
         out_uca = os.path.join(self.out_path, 'uca')
         out_edge_done = os.path.join(self.out_path, 'edge_done')
         out_edge_todo = os.path.join(self.out_path, 'edge_todo')
-        
+
         # populate kwds
         kwds = [dict(fn=self.elev_source_files[i],
                      out_fn_uca=out_uca,
@@ -503,32 +516,13 @@ class ProcessManager(tl.HasTraits):
                 for i in range(self.n_inputs)]
         # update metrics and decide who goes first
         mets = self.update_uca_edge_metrics('uca')
-        I = np.argpartition(-mets[:, 0], self.n_workers * 2)
+        if mets.shape[0] == 1:
+            I = np.zeros(1, int)
+        else:
+            I = np.argpartition(-mets[:, 0], self.n_workers * 2)
 
-        # create pool and queue
-        pool = Pool(processes=self.n_workers)
-
-        # submit workers
-        active = I[:self.n_workers * 2].tolist()
-        active = [a for a in active if mets[a, 0] > 0]
-        res = [pool.apply_async(calc_uca_ec, kwds=kwds[i]) for i in active] 
-        print ("Starting with {}".format(active))
-        while res:
-            # monitor and submit new workers as needed
-            finished = []
-            finished_res = []
-            for i, r in enumerate(res):
-                try: 
-                    s = r.get(timeout=0.001)
-                    finished.append(active[i])
-                    finished_res.append(i)
-                    print(s)
-                except (mpTimeoutError, TimeoutError) as e:
-                    print(e)
-                    pass
-            if not finished: continue
-            active = [a for a in active if a not in finished]
-            res = [r for i, r in enumerate(res) if i not in finished_res]
+        # Helper function for updating metrics
+        def check_mets(finished):
             check_met_inds = []
             for f in finished:
                 i, j, k = self.grid_id[f]
@@ -542,7 +536,72 @@ class ProcessManager(tl.HasTraits):
                 # bottom
                 if i < self.grid_id2i.shape[0] - 1: check_met_inds.append(self.grid_id2i[i+1, j])
             mets = self.update_uca_edge_metrics('uca', check_met_inds)
-            I = np.argpartition(-mets[:, 0], self.n_workers * 2)
+            if mets.shape[0] == 1:
+                I = np.zeros(1, int)
+            else:
+                I = np.argpartition(-mets[:, 0], self.n_workers * 2)
+            return mets, I
+
+        # Non-parallel case (useful for debuggin)
+        if self.n_workers == 1:
+            I_old = np.zeros_like(I)
+            while np.any(I_old != I):
+                s = calc_uca_ec(**kwds[I[0]])
+                I_old[:] = I[:]
+                mets, I = check_mets([I[0]])
+                if self._debug:
+                    from matplotlib.pyplot import figure, subplot, pcolor, title, pause, axis, colorbar, clim, show
+                    figure(figsize=(8, 4), dpi=200)
+                    subplot(221)
+                    pcolor(self.out_file['uca'][:])
+                    title('uca [{}] --> [{}]'.format(I_old[0], I[0]))
+                    axis('scaled')
+                    subplot(222)
+                    pcolor(self.out_file['edge_todo'][:] *2.0 + self.out_file['edge_done'][:] *1.0, cmap='jet')
+                    title('edge_done (1) edge_todo (2)')
+                    axis('scaled')
+                    clim(0, 3)
+                    colorbar()
+                    subplot(223)
+                    pcolor(self.out_file['edge_todo'][:] *2.0 + self.out_file['edge_done'][:] *1.0 + self.out_file['slope'][:], cmap='jet')
+                    title('edge_done (1) edge_todo (2) + slope')
+                    axis('scaled')
+                    clim(0, 3)
+                    colorbar()
+                    subplot(224)
+                    pcolor(self.out_file['aspect'][:]*180/np.pi, cmap='hsv')
+                    title('aspect')
+                    axis('scaled')
+                    clim(0, 360)
+                    colorbar()
+                    show(True)
+            return mets
+
+        # create pool and queue
+        pool = Pool(processes=self.n_workers)
+
+        # submit workers
+        active = I[:self.n_workers * 2].tolist()
+        active = [a for a in active if mets[a, 0] > 0]
+        res = [pool.apply_async(calc_uca_ec, kwds=kwds[i]) for i in active]
+        print ("Starting with {}".format(active))
+        while res:
+            # monitor and submit new workers as needed
+            finished = []
+            finished_res = []
+            for i, r in enumerate(res):
+                try:
+                    s = r.get(timeout=0.001)
+                    finished.append(active[i])
+                    finished_res.append(i)
+                    #print(s)
+                except (mpTimeoutError, TimeoutError) as e:
+                    print(e)
+                    pass
+            if not finished: continue
+            mets, I = check_mets(finished)
+            active = [a for a in active if a not in finished]
+            res = [r for i, r in enumerate(res) if i not in finished_res]
             candidates = I[:self.n_workers * 2].tolist()
             candidates = [c for c in candidates if c not in active and mets[c, 0] > 0][:len(finished)]
             res.extend([pool.apply_async(calc_uca_ec, kwds=kwds[i]) for i in candidates])
@@ -558,27 +617,17 @@ class ProcessManager(tl.HasTraits):
     def queue_processes(self, function, kwds, success=None, intermediate_fun=lambda:None):
         # initialize success if not created
         if success is None:
-            success = [0] * len(kwds) 
-
-        if self.n_workers == 1:
-            res = []
-            for i, kwd in enumerate(kwds):
-                if success[i]: continue
-                s = function(**kwd)
-                success[i] = s[0] 
-                print(s)
-            intermediate_fun()
-            return success
+            success = [0] * len(kwds)
 
         # create pool and queue
         pool = Pool(processes=self.n_workers)
 
         # submit workers
         print ("Sumitting workers", end='...')
-        #success = [function(**kwds[i]) 
+        #success = [function(**kwds[i])
         #        for i in range(self.n_inputs) if indices[i]]
 
-        res = [pool.apply_async(function, kwds=kwd) 
+        res = [pool.apply_async(function, kwds=kwd)
                 for i, kwd in enumerate(kwds) if not success[i]]
         print(" waiting for computation")
 
