@@ -144,7 +144,7 @@ class DEMProcessor(tl.HasTraits):
 
     @tl.default('dY')
     def _default_dY(self):
-        return np.ones(self.elev.shape[0] - 1) / self.elev.shape[0]  
+        return np.ones(self.elev.shape[0] - 1) / self.elev.shape[0]
 
     flats = tl.Instance(np.ndarray, None)  # Boolean array indicating location of flats
 
@@ -547,7 +547,7 @@ class DEMProcessor(tl.HasTraits):
             self.edge_done = res[2]
             self.uca = res[0]
         else:
-            print("Starting edge resolution round: ", end=' ')
+            print("Starting edge resolution round: ", end='')
             # last return value will be None: edge_
             area, e2doi, edone, _ = \
                 self._calc_uca_chunk_update(self.elev, self.dX, self.dY,
@@ -617,13 +617,13 @@ class DEMProcessor(tl.HasTraits):
                     if e == 0:
                         self.uca[slice_d][ids] += self.uca[slice_o][ids] \
                             * proportion[ids]
-                    self.uca[slice_d][ids] += \
-                        np.roll(np.roll(self.uca[slice_o] * (1 - proportion),
-                                        ed[0], 0),
-                                ed[1], 1)[ids]
+                        self.uca[slice_d][ids] += \
+                            np.roll(np.roll(self.uca[slice_o] * (1 - proportion),
+                                            ed[0], 0),
+                                    ed[1], 1)[ids]
                     if e == 1:
                         self.uca[slice_d][ids] += \
-                            np.roll(np.roll(self.uca[slice_o] * (proportion),
+                            np.roll(np.roll(self.uca[slice_o] * (1 - proportion),
                                             ed[0], 0),
                                     ed[1], 1)[ids]
 
@@ -719,7 +719,7 @@ class DEMProcessor(tl.HasTraits):
             # references.
             while (ids - ids_old).sum() > 0:
                 # %%
-                print("x", end=' ')
+                print("x", end='')
                 ids_old = ids.copy()
                 ids_todo = ids_i[ids.ravel()]
                 ids[:] = False
@@ -761,7 +761,7 @@ class DEMProcessor(tl.HasTraits):
             # circular references.
             while (ids - ids_old).sum() > 0:
                 # %%
-                print("o", end=' ')
+                print("o", end='')
                 ids_old = ids.copy()
                 done.ravel()[ids] = True
                 ids_todo = ids_i[ids.ravel()]
@@ -838,7 +838,7 @@ class DEMProcessor(tl.HasTraits):
             # circular references.
             while (ids - ids_old).sum() > 0:
                 # %%
-                print("x", end=' ')
+                print("x", end='')
                 ids_old = ids.copy()
 #                edge_todo_old = arr.copy()
                 ids_todo = ids_i[ids.ravel()]
@@ -904,7 +904,7 @@ class DEMProcessor(tl.HasTraits):
         done = np.zeros(data.shape, bool)
         done.ravel()[ids] = True
         # deal with no-data values
-        done[1:-1, 1:-1] = done[1:-1, 1:-1] 
+        done[1:-1, 1:-1] = done[1:-1, 1:-1]
 
         # Check the inlet edges
         edge_todo = np.zeros_like(done)
@@ -941,7 +941,7 @@ class DEMProcessor(tl.HasTraits):
         max_elev = -1
         while (np.any(~done_) and count < self.circular_ref_maxcount)\
                 and done_sum != done_.sum():
-            print(".", end=' ') #done_sum, done_.sum(), max_elev, count,
+            print(".", end='') #done_sum, done_.sum(), max_elev, count,
             import sys;sys.stdout.flush()
             done_sum = done_.sum()
             count += 1
