@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 # NOTES
-# TODO: Fix edge resolution top-bottom bug
+# TODO: Fix overview bugs
+# TODO: Fix edge resolution corners bug and multi-contributions bug
 # TODO: Ensure that 'success' is written out to a file.
 # TODO: Clean up filenames -- should be attributes of class
 # TODO: Make a final seamless result with no overlaps -- option to save out to GeoTIFF, and quantize data for cheaper storage
@@ -446,6 +447,7 @@ class ProcessManager(tl.HasTraits):
                     'right': (slc[0], slc[1].stop + lon_end_e - 1),
                     'top': (slc[0].start - lat_start_e, slc[1]),
                     'bottom': (slc[0].stop + lat_end_e - 1, slc[1]),
+
                         }
             self.edge_data.append(edge_data)
 
@@ -516,13 +518,14 @@ class ProcessManager(tl.HasTraits):
         shape = zf.shape
         chunks = zf.chunks
         if np.any([c == 0 for c in chunks]):
-            return 0
+            chunks = shape.copy()
+            # return 0
 
         n_files = [np.ceil(s / c) for s, c in zip(shape, chunks)]
 
         new_shape = [int(np.ceil(s / (factor))) for s in shape]
         new_chunks = [int(max((factor), np.ceil(ns / n))) for ns, n in zip(new_shape, n_files)]
-        if np.any([n <= ov for n in new_shape]):
+        if np.any([n <= factor for n in new_shape]):
             return 0
 
         # Making a new file with the required shape/size
