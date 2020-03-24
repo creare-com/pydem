@@ -130,6 +130,64 @@ def calc_uca_ec(fn, out_fn_uca, out_fn_todo, out_fn_done, out_fn, out_slice, edg
         return (0, fn + ':' + traceback.format_exc())
     return (1, "{}: success".format(fn))
 
+def calc_twi(fn, out_fn_twi, out_fn, out_slice):
+    try:
+        kwargs = dem_processor_from_raster_kwargs(fn)
+        kwargs['elev'] = zarr.open(out_fn, mode='a')['elev'][out_slice]
+        kwargs['direction'] = zarr.open(out_fn, mode='r')['aspect'][out_slice]
+        kwargs['mag'] = zarr.open(out_fn, mode='a')['slope'][out_slice]
+        kwargs['fill_flats'] = False  # assuming we already did this
+        kwargs['uca'] = zarr.open(out_fn, mode='a')['uca'][out_slice]
+        dp = DEMProcessor(**kwargs)
+        dp.find_flats()
+        dp.calc_twi()
+        save_result(dp.twi.astype(np.float32), out_fn_twi, out_slice)
+    except Exception as e:
+        return (0, fn + ':' + traceback.format_exc())
+    return (1, "{}: success".format(fn))
+
+def calc_overview(fn, out_fn, factor, in_slice, out_slice):
+    try:
+        outfile = zarr.open(out_fn, mode='a')
+        data = zarr.open(fn, mode='r')[in_slice]
+
+        if np.all(data == 0):
+            return (0, 'all zero')
+
+        # do calculation
+        easy_slice = tuple([slice(0, (s // factor) * factor) for s in data.shape])
+        overview = np.zeros([int(np.ceil(s / factor)) for s in data.shape])
+        eo_slice = tuple([slice(0, (s // factor)) for s in data.shape])
+        easy = data[easy_slice].reshape(data.shape[0] // factor, factor, data.shape[1] // factor, factor)
+        easy = np.moveaxis(easy, 1, -2).reshape(data.shape[0] // factor, data.shape[1] // factor, factor ** 2)
+        overview[eo_slice] = easy.mean(axis=-1)
+
+        # do edges
+        # right edge
+        right_edge = data[easy_slice[0], easy_slice[1].stop:].reshape(data.shape[0] // factor, -1)
+        right_edge = right_edge.mean(axis=1)
+        overview[eo_slice[0], eo_slice[1].stop:] = right_edge[:, None]
+
+        # Bottom edge
+        bottom_edge = data[easy_slice[0].stop:, easy_slice[1]].reshape(-1, data.shape[1] // factor)
+        bottom_edge = bottom_edge.mean(axis=0)
+        overview[eo_slice[0].stop:, eo_slice[1]] = bottom_edge[None, :]
+
+        # corner
+        corner_edge = data[easy_slice[0].stop:, easy_slice[1].stop:].mean()
+        overview[eo_slice[0].stop:, eo_slice[1].stop:] = corner_edge
+
+        # save results
+        outfile[out_slice] = overview
+    except Exception:
+        return (0, traceback.format_exc())
+
+    return (1, (in_slice, factor))
+
+
+
+
+
 def _test_float(a, b):
     return np.any(np.abs(a - b) > 1e-8)
 
@@ -168,6 +226,7 @@ class ProcessManager(tl.HasTraits):
     in_path = tl.Unicode('.')
     out_format = tl.Enum(['zarr'], default_value='zarr')
 
+    out_path_noverlap = tl.Unicode()
     out_path = tl.Unicode()
     @tl.default('out_path')
     def _out_path_default(self):
@@ -188,6 +247,7 @@ class ProcessManager(tl.HasTraits):
         esf.sort()
         return esf
 
+    out_file_noverlap = tl.Any()  # only for .zarr cases
     out_file = tl.Any()  # only for .zarr cases
     @tl.default('out_file')
     def _out_file_default(self):
@@ -221,6 +281,7 @@ class ProcessManager(tl.HasTraits):
     grid_lat_size_unique = tt.Array()
     grid_lon_size_unique = tt.Array()
     grid_size_tot = tl.List()
+    grid_size_tot_unique = tl.List()
     grid_chunk = tl.List()
     edge_data = tl.List()
 
@@ -408,10 +469,84 @@ class ProcessManager(tl.HasTraits):
             grid_slice.append(slc)
 
         self.grid_slice_noverlap = grid_slice
+        self.grid_size_tot_unique = [int(self.grid_lat_size_unique.sum()),
+                                     int(self.grid_lon_size_unique.sum())]
 
-        def compute_non_overlap_data(self, data, overlaps=[0, 0]):
-            pass
+    def save_non_overlap_data(self, new_fn=None, keys=['elev', 'uca', 'aspect', 'slope', 'twi'], chunks=None):
+        if new_fn is None:
+            new_fn = self.out_path.replace('.zarr', '') + '_compact.zarr'
 
+        if chunks is None:
+            chunks = [int(self.grid_size_tot_unique[0] // self.grid_lat_size_unique.size),
+                      int(self.grid_size_tot_unique[1] // self.grid_lon_size_unique.size)]
+        for key in keys:
+            zf = zarr.open(os.path.join(new_fn, key),
+                           shape=self.grid_size_tot_unique,
+                           chunks=chunks, mode='a', dtype=np.float32)
+            for i in range(self.n_inputs):
+                zf[self.grid_slice_noverlap[i]] = self.out_file[key][self.grid_slice_unique[i]]
+
+        self.out_file_noverlap = zarr.open(new_fn)
+        self.out_path_noverlap = new_fn
+
+    def process_overviews(self, out_path, keys=['elev', 'uca', 'aspect', 'slope', 'twi'], overviews=[3, 3**2, 3**3, 3**4, 3**5, 3**6, 3**7]):
+        for key in keys:
+            last_ov = None
+            for ov in overviews:
+                print ("Processing overview {}:{}".format(key, ov))
+                success = self._calc_overview(out_path, key, ov, last_ov)
+                if success == 0:
+                    break
+                last_ov = ov
+
+    def _calc_overview(self, out_path, key, ov, last_ov):
+
+        new_key = '{}_{}'.format(key.split('_')[0], ov)
+        if last_ov is None:
+            last_key = key
+            last_ov = 1
+        else:
+            last_key = '{}_{}'.format(key.split('_')[0], last_ov)
+
+        out_file = os.path.join(out_path, last_key)
+        new_file = os.path.join(out_path, new_key)
+        factor = ov // last_ov
+
+        zf =  zarr.open(out_file)
+        shape = zf.shape
+        chunks = zf.chunks
+        if np.any([c == 0 for c in chunks]):
+            return 0
+
+        n_files = [np.ceil(s / c) for s, c in zip(shape, chunks)]
+
+        new_shape = [int(np.ceil(s / (factor))) for s in shape]
+        new_chunks = [int(max((factor), np.ceil(ns / n))) for ns, n in zip(new_shape, n_files)]
+        if np.any([n <= ov for n in new_shape]):
+            return 0
+
+        # Making a new file with the required shape/size
+        print("Making a new file with shape {} --> {} and chunks {} --> {}".format(shape, new_shape, chunks, new_chunks))
+        zf_new = zarr.open(new_file, shape=new_shape, chunks=new_chunks, mode='a', dtype=np.float32)
+
+        # Creating list of inputs, populate kwds
+        kwds = []
+        row = -1
+        while (row * new_chunks[0]) < new_shape[0]:
+            row += 1
+            col = -1
+            while (col * new_chunks[1]) < new_shape[1]:
+                col += 1
+                kwd = dict(fn=out_file, out_fn=new_file, factor=factor,
+                           in_slice=(slice(row * new_chunks[0] * factor, (row + 1) * new_chunks[0] * factor),
+                                     slice(col * new_chunks[1] * factor, (col + 1) * new_chunks[1] * factor)),
+                         out_slice=(slice(row * new_chunks[0], (row + 1) * new_chunks[0]),
+                                     slice(col * new_chunks[1], (col + 1) * new_chunks[1]))
+                         )
+                kwds.append(kwd)
+        success = self.queue_processes(calc_overview, kwds)
+        # self.out_file['success'][:, 3] = success
+        return success
 
     def process_elevation(self, indices=None):
         # TODO: Also find max, mean, and min elevation on edges
@@ -596,14 +731,14 @@ class ProcessManager(tl.HasTraits):
                     finished_res.append(i)
                     #print(s)
                 except (mpTimeoutError, TimeoutError) as e:
-                    print(e)
+                    print('.', end='')
                     pass
             if not finished: continue
             mets, I = check_mets(finished)
             active = [a for a in active if a not in finished]
             res = [r for i, r in enumerate(res) if i not in finished_res]
             candidates = I[:self.n_workers * 2].tolist()
-            candidates = [c for c in candidates if c not in active and mets[c, 0] > 0][:len(finished)]
+            candidates = [c for c in candidates if c not in active and mets[c, 0] > 0][:(self.n_workers * 2 - len(res))]
             res.extend([pool.apply_async(calc_uca_ec, kwds=kwds[i]) for i in candidates])
             active.extend(candidates)
             print ("Added {}, active {}".format(candidates, active))
@@ -654,3 +789,19 @@ class ProcessManager(tl.HasTraits):
         self.process_uca()
         print("Compute UCA Corrections")
         self.process_uca_edges()
+
+        out_twi = os.path.join(self.out_path, 'twi')
+        # Initialize the zarr array with the correct sized chunks
+        zf = zarr.open(out_twi, shape=self.grid_size_tot, chunks=self.grid_chunk, mode='a',
+                dtype=np.float32)
+
+        # populate kwds
+        kwds = [dict(fn=self.elev_source_files[i],
+                     out_fn_twi=out_twi,
+                     out_fn=self.out_path,
+                     out_slice=self.grid_slice[i])
+                for i in range(self.n_inputs)]
+
+        success = self.queue_processes(calc_twi, kwds, success=self.out_file['success'][:, 3])
+        self.out_file['success'][:, 3] = success
+        return success
