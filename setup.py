@@ -88,7 +88,7 @@ setup(
         'geopy',
         'traitlets',
         'traittypes',
-        'zarray',
+        'zarr',
         'cython'
         ],
 

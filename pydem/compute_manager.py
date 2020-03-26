@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
 # NOTES
-# TODO: Fix overview bugs
 # TODO: Fix edge resolution corners bug and multi-contributions bug
 # TODO: Ensure that 'success' is written out to a file.
 # TODO: Clean up filenames -- should be attributes of class
@@ -437,6 +436,28 @@ class ProcessManager(tl.HasTraits):
             else:
                 lat_end = lat_end_e = 0
 
+            # Do corner overlaps
+            # top left
+            if id[1] > 0 or id[0] > 0:
+                corner_tl = 0
+            else:
+                corner_tl = 1
+            # bottom left
+            if id[1] > 0 or id[0] < (self.grid_id2i.shape[0] - 1):
+                corner_bl = 0
+            else:
+                corner_bl = 1     
+            # top right
+            if id[1] < (self.grid_id2i.shape[1] - 1) or id[0] > 0:
+                corner_tr = 0
+            else:
+                corner_tr = 1
+            # bottom right
+            if id[1] < (self.grid_id2i.shape[1] - 1) or id[0] < (self.grid_id2i.shape[0] - 1):
+                corner_br = 0
+            else:
+                corner_br = 1
+
             self.grid_slice_unique.append((
                 slice(slc[0].start + lat_start, slc[0].stop - lat_end),
                 slice(slc[1].start + lon_start, slc[1].stop - lon_end)))
@@ -446,8 +467,11 @@ class ProcessManager(tl.HasTraits):
                     'left': (slc[0], slc[1].start - lon_start_e),
                     'right': (slc[0], slc[1].stop + lon_end_e - 1),
                     'top': (slc[0].start - lat_start_e, slc[1]),
+                    'top-left': (slc[0].stop + lat_end_e * corner_tl - 1, slc[1].start - lon_start_e * corner_tl),
+                    'top-right': (slc[0].stop + lat_end_e  * corner_tr - 1, slc[1].stop + lon_end_e  * corner_tr - 1),                    
                     'bottom': (slc[0].stop + lat_end_e - 1, slc[1]),
-
+                    'bottom-left': (slc[0].stop + lat_end_e * corner_bl - 1, slc[1].start - lon_start_e * corner_bl),
+                    'bottom-right': (slc[0].stop + lat_end_e * corner_br - 1, slc[1].stop + lon_end_e * corner_br - 1),
                         }
             self.edge_data.append(edge_data)
 
