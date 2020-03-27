@@ -29,7 +29,11 @@ EDGE_SLICES = {
         'left': (slice(0, None), 0),
         'right': (slice(0, None), -1),
         'top' : (0, slice(0, None)),
-        'bottom' : (-1, slice(0, None))
+        'bottom' : (-1, slice(0, None)),
+        'top-left': (0, 0),
+        'top-right' : (0, -1),
+        'bottom-right': (-1, -1),
+        'bottom-left' : (-1, 0),
         }
 
 def calc_elev_cond(fn, out_fn, out_slice):
