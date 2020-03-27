@@ -739,6 +739,12 @@ class DEMProcessor(tl.HasTraits):
             done = drain_pixels_done(ids, done, A.row, A.col)
 
         done[np.isnan(data)] = True  # deal with no-data values
+        # Set all the edges to "done". This ensures that another edges does not stop
+        # the propagation of data
+        done[:, 0] = True
+        done[:, -1] = True
+        done[0, :] = True
+        done[-1, :] = True
         #
         ids = ids0.copy()
         # Set all the edges to "done" for ids0. This ensures that no edges
