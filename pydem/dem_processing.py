@@ -523,13 +523,13 @@ class DEMProcessor(tl.HasTraits):
                       'bottom': (slice(-1, None), slice(None))}
             for key, val in slices.items():
                 # To initialize and edge it needs to have data and be finished
-                uca_edge_done[val] += \
-                    edge_init_done[key].reshape(uca_edge_init[val].shape)
-                uca_edge_init[val] = \
+                uca_edge_done[val] = uca_edge_done[val] \
+                    | edge_init_done[key].reshape(uca_edge_init[val].shape)
+                uca_edge_init[val] += \
                     edge_init_data[key].reshape(uca_edge_init[val].shape)
                 uca_edge_init[val][~uca_edge_done[val]] = 0
-                uca_edge_todo[val] += \
-                    edge_init_todo[key].reshape(uca_edge_init[val].shape)
+                uca_edge_todo[val] = uca_edge_todo[val]\
+                    | edge_init_todo[key].reshape(uca_edge_init[val].shape)
 
         if uca_init is None:
             self.uca = np.full(self.elev.shape, FLAT_ID_INT, 'float64')
