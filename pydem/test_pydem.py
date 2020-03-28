@@ -483,6 +483,8 @@ def make_test_files(NN=32, plotflag=False, testdir='testtiff', testnum=None):
              + [spiral]  # case 30
              + [lambda x, y: case_cone(x, y, True)]  # case 31
              + [lambda x, y: case_cone_scaled(lon, lat, True)]  # case 32
+             + [lambda x, y: case_cone(x, y, False)]  # case 32
+             + [lambda x, y: case_cone_scaled(lon, lat, False)]  # case 33
              ]
 
     tests = tests[0]  # Remove the outer list
