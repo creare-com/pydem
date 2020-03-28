@@ -73,8 +73,8 @@ try:
     CYTHON = True
 except:
     CYTHON = False
-    warnings.warn("Cython functions are not compiled. UCA calculation will be,"
-                  " slow. Consider compiling cython functions using: "
+    warnings.warn("Cython functions are not compiled. UCA cannot be calculated."
+                  " Consider compiling cython functions using: "
                   "python setup.py build_ext --inplace", RuntimeWarning)
 # CYTHON = False
 
@@ -507,6 +507,8 @@ class DEMProcessor(tl.HasTraits):
         Unless the tile is too large so that the calculation is chunked. In
         that case, the whole tile is re-computed.
         """
+        if not CYTHON :
+            raise RuntimeError("Cython functions need to be compiled to perform UCA computations")
         if self.direction is None:
             self.calc_slopes_directions()
 
@@ -559,11 +561,12 @@ class DEMProcessor(tl.HasTraits):
             self.uca += area
             self.edge_todo = e2doi
             self.edge_done = edone
+            
+        # Fix the very last pixel on the edges
+        self.fix_edge_pixels(edge_init_data, edge_init_done, edge_init_todo)
 
         print('..Done')
 
-        # Fix the very last pixel on the edges
-        self.fix_edge_pixels(edge_init_data, edge_init_done, edge_init_todo)
 
         gc.collect()  # Just in case
         return self.uca
@@ -637,62 +640,35 @@ class DEMProcessor(tl.HasTraits):
                     self.uca[slice_d][:, ids] = edge_init_data[side][ids]
 
     def _calc_uca_chunk_update(self, data, dX, dY, direction, mag, flats,
-                               tile_edge=None, i=None,
                                area_edges=None, edge_todo=None, edge_done=None,
                                plotflag=False):
         """
         Calculates the upstream contributing area due to contributions from
         the edges only.
         """
-        # %%
-
-        sides = ['left', 'right', 'top', 'bottom']
-        slices = ((slice(None), slice(0, 1)), (slice(None), slice(-1, None)),
-                  (slice(0, 1), slice(None)), (slice(-1, None), slice(None)))
         # Figure out which section the drainage goes towards, and what
         # proportion goes to the straight-sided (as opposed to diagonal) node.
-
         section, proportion = self._calc_uca_section_proportion(
             data, dX, dY, direction, flats)
 
         # Build the drainage or adjacency matrix
         A = self._mk_adjacency_matrix(section, proportion, flats, data, mag, dX, dY)
-        if CYTHON:
-            B = A
-            C = A.tocsr()
-        if not CYTHON:
-            A = A.tocoo()
+        B = A
+        C = A.tocsr()
 
         ids = np.zeros(data.shape, bool)
         area = np.zeros(data.shape, 'float64')
         # Set the ids to the edges that are now done, and initialize the
         # edge area
-        if tile_edge is not None:
-            if edge_todo is not None:
-                edge_todo_tile = edge_todo
-            else:
-                edge_todo_tile = None
-            edge_todo = np.zeros(data.shape, bool)
-            for side, slice0 in zip(sides, slices):
-                edge = getattr(tile_edge, side).ravel()[i]
-                ids[slice0] = edge.done & edge.coulddo
-                # only add area from the finished edges
-                area[slice0] = edge.data * edge.done * edge.coulddo
-                edge_todo[slice0] = edge.todo & ~edge.done
-        elif area_edges is not None and edge_todo is not None \
-                and edge_done is not None:
-            area[:, 0] = area_edges[:, 0]
-            area[:, -1] = area_edges[:, -1]
-            area[-1, :] = area_edges[-1, :]
-            area[0, :] = area_edges[0, :]
+        area[:, 0] = area_edges[:, 0]
+        area[:, -1] = area_edges[:, -1]
+        area[-1, :] = area_edges[-1, :]
+        area[0, :] = area_edges[0, :]
 
-            # Initialize starting ids
-            ids = edge_done & edge_todo
-            edge_todo = edge_todo & ~edge_done
-            edge_todo_tile = None
-        else:
-            raise RuntimeError("Need to specify either tile_edge or area_edges"
-                               "in _calc_uca_chunk_update")
+        # Initialize starting ids
+        ids = edge_done & edge_todo
+        edge_todo = edge_todo & ~edge_done
+        edge_todo_tile = None
 
         ids = ids.ravel()
         ids0 = ids.copy()
@@ -703,42 +679,15 @@ class DEMProcessor(tl.HasTraits):
         edge_todo_i = edge_todo.copy()
         ids_old = np.zeros_like(ids)
 
-        # I need this to keep track of when I have to add the area, and when
-        # I have to replace the area.
-        ids_i = np.arange(ids.size)
-
         done = np.ones(data.shape, bool)
         done.ravel()[ids] = False
 
-        # Now we have to advance done through the mesh to figure out which
-        # contributions matter (i.e. what's done already)
-        def drain_pixels_done(ids, arr, rows_A, cols_A):
-            ids_old = ids.copy()
-            ids_old[:] = False
-            # If I use ids.sum() > 0 then I might get stuck in circular
-            # references.
-            while (ids - ids_old).sum() > 0:
-                # %%
-                print("x", end='')
-                ids_old = ids.copy()
-                ids_todo = ids_i[ids.ravel()]
-                ids[:] = False
-                for id_todo in ids_todo:
-                    rows = cols_A == id_todo
-                    rows_id = rows_A[rows]
-                    ids[rows_id] += arr.ravel()[rows_id] is True
-                    arr.ravel()[rows_id] = False  # Set second arrival new id
-
-            return arr
-
-        if CYTHON:
-            a = cyutils.drain_connections(
-                done.ravel(), ids, B.indptr, B.indices, set_to=False)
-            done = a.reshape(done.shape).astype(bool)
-        else:
-            done = drain_pixels_done(ids, done, A.row, A.col)
+        a = cyutils.drain_connections(
+            done.ravel(), ids, B.indptr, B.indices, set_to=False)
+        done = a.reshape(done.shape).astype(bool)
 
         done[np.isnan(data)] = True  # deal with no-data values
+        
         # Set all the edges to "done". This ensures that another edges does not stop
         # the propagation of data
         done[:, 0] = True
@@ -747,125 +696,26 @@ class DEMProcessor(tl.HasTraits):
         done[-1, :] = True
         #
         ids = ids0.copy()
-        # Set all the edges to "done" for ids0. This ensures that no edges
-        # will ever be updated, whether they are done or not.
-        ids0 = ids0.reshape(data.shape)
-        ids0[:, 0] = True
-        ids0[:, -1] = True
-        ids0[0, :] = True
-        ids0[-1, :] = True
-        ids0 = ids0.ravel()
-
         ids_old[:] = 0
 
-        # %%
-        def drain_area(ids, area, done, rows_A, cols_A, data_A,
-                       edge_todo_tile):
-            ids_old = ids.copy()
-            ids_old[:] = False
-            # If I use ids.sum() > 0 then I might get stuck in
-            # circular references.
-            while (ids - ids_old).sum() > 0:
-                # %%
-                print("o", end='')
-                ids_old = ids.copy()
-                done.ravel()[ids] = True
-                ids_todo = ids_i[ids.ravel()]
-                ids[:] = False
-                for id_todo in ids_todo:
-                    rows = cols_A == id_todo
-                    rows_id = rows_A[rows]
-                    factor = data_A[rows]
-                    # not allowed to modify edge values
-                    edge_filter_ids = ~ids0[rows_id]
-                    factor = factor[edge_filter_ids]
-                    rows_id = rows_id[edge_filter_ids]
-                    area.ravel()[rows_id] += area.ravel()[id_todo] * factor
-                    if edge_todo_tile is not None:
-                        edge_todo_tile.ravel()[rows_id] += \
-                            edge_todo_tile.ravel()[id_todo] * factor
-                    # Figure out of this cell that just received a contribution
-                    # should give its contribution to what's next... i.e. make
-                    # sure all inputs have been added together
-                    for row_id in rows_id:  # this is the 'waiting' part
-                        cols = cols_A[rows_A == row_id]
-                        ids[row_id] += (~(done.ravel()[cols])).sum() == 0
-#                        for col in cols:
-#                            print 'row', row_id, 'col', col, 'done', done.ravel()[col]
-                # Follow the drainage along. New candidates are cells that
-                # just changed
-                #ids = (track_id_old.ravel() == -1) \
-                #        & (track_id_old.ravel() != track_id.ravel())
-#                done.ravel()[ids] = True
-    #            figure(7);clf();imshow(ids.reshape(mag.shape), interpolation='none')
-    #            figure(8);clf();imshow(area, interpolation='none');colorbar()
-    #            figure(9);clf();imshow(done, interpolation='none');colorbar()
-    #            figure(10);clf();imshow(a + area - b, interpolation='none');colorbar()
-                #%%
-    #            self._plot_connectivity(A, data=data)
-            return area, done, edge_todo_tile
-
-        if CYTHON:
-            if edge_todo_tile is not None:
-                a, b, c, d = cyutils.drain_area(area.ravel(),
-                                                done.ravel(),
-                                                ids,
-                                                B.indptr, B.indices, B.data,
-                                                C.indptr, C.indices,
-                                                area.shape[0], area.shape[1],
-                                                edge_todo_tile.astype('float64').ravel(),
-                                                skip_edge=True)
-                edge_todo_tile = c.reshape(edge_todo_tile.shape).astype('bool')
-            else:
-                a, b, c, d = cyutils.drain_area(area.ravel(),
-                                                done.ravel(),
-                                                ids,
-                                                B.indptr, B.indices, B.data,
-                                                C.indptr, C.indices,
-                                                area.shape[0], area.shape[1],
-                                                skip_edge=True)
-            area = a.reshape(area.shape)
-            done = b.reshape(done.shape)
-
-        else:
-            area, done, edge_todo_tile = \
-                drain_area(ids, area, done, A.row, A.col, A.data,
-                           edge_todo_tile)
+        a, b, c, d = cyutils.drain_area(area.ravel(),
+                                        done.ravel(),
+                                        ids,
+                                        B.indptr, B.indices, B.data,
+                                        C.indptr, C.indices,
+                                        area.shape[0], area.shape[1],
+                                        skip_edge=True)
+        area = a.reshape(area.shape)
+        done = b.reshape(done.shape)
 
         # Rather unfortunately, we still have to follow through the boolean
         # edge_todo matrix...
         ids = edge_todo.copy().ravel()
         # %%
-
-        def drain_pixels_todo(ids, arr, rows_A, cols_A):
-            ids_old = ids.copy()
-            ids_old[:] = False
-            # If I use ids.sum() > 0 then I might get stuck in
-            # circular references.
-            while (ids - ids_old).sum() > 0:
-                # %%
-                print("x", end='')
-                ids_old = ids.copy()
-#                edge_todo_old = arr.copy()
-                ids_todo = ids_i[ids.ravel()]
-                ids[:] = False
-                for id_todo in ids_todo:
-                    rows = cols_A == id_todo
-                    rows_id = rows_A[rows]
-                    ids[rows_id] += arr.ravel()[rows_id] == False
-                    arr.ravel()[rows_id] = True  # Set new id of second arrival
-
-#                #Follow the drainage along. New candidates are cells that just changed
-#                ids = (edge_todo_old.ravel() != arr.ravel())
-            return arr
-
-        if CYTHON:
-            a = cyutils.drain_connections(edge_todo.ravel(),
-                                          ids, B.indptr, B.indices,
-                                          set_to=True)
-            edge_todo = a.reshape(edge_todo.shape).astype(bool)
-        else:
-            edge_todo = drain_pixels_todo(ids, edge_todo, A.row, A.col)
+        a = cyutils.drain_connections(edge_todo.ravel(),
+                                      ids, B.indptr, B.indices,
+                                      set_to=True)
+        edge_todo = a.reshape(edge_todo.shape).astype(bool)
 
         area[flats] = np.nan
         edge_done = ~edge_todo
@@ -886,8 +736,7 @@ class DEMProcessor(tl.HasTraits):
 
         # Build the drainage or adjacency matrix
         A = self._mk_adjacency_matrix(section, proportion, flats, data, mag, dX, dY)
-        if CYTHON:
-            B = A.tocsr()
+        B = A.tocsr()
 
         colsum = np.array(A.sum(1)).ravel()
         ids = colsum == 0  # If no one drains into me
@@ -931,15 +780,14 @@ class DEMProcessor(tl.HasTraits):
         edge_todo[np.isnan(data)] = False  # Don't do masked areas
         # Initialize done edges
         edge_todo_i = edge_todo.copy()
-        ids_old = np.zeros_like(ids)
         # %%
         count = 1
 
-        if CYTHON:
-            area_ = area.ravel()
-            done_ = done.ravel()
-            edge_todo_ = edge_todo.astype('float64').ravel()
-            edge_todo_no_mask_ = edge_todo_no_mask.astype('float64').ravel()
+        # Pack for Cython function
+        area_ = area.ravel()
+        done_ = done.ravel()
+        edge_todo_ = edge_todo.astype('float64').ravel()
+        edge_todo_no_mask_ = edge_todo_no_mask.astype('float64').ravel()
         data_ = data.ravel()
 
         done_ = done.ravel()
@@ -951,34 +799,21 @@ class DEMProcessor(tl.HasTraits):
             import sys;sys.stdout.flush()
             done_sum = done_.sum()
             count += 1
-            if CYTHON:
-                area_, done_, edge_todo_, edge_todo_no_mask_ = cyutils.drain_area(
-                    area_, done_, ids,
-                    A.indptr, A.indices, A.data, B.indptr, B.indices,
-                    area.shape[0], area.shape[1],
-                    edge_todo_, edge_todo_no_mask_)
-            else:
-                # If I use ids.sum() > 0 then I might get stuck in
-                # circular references.
-                while (ids - ids_old).sum() > 0:
-                    # %%
-                    ids_old = ids.copy()
-                    ids, area, done, edge_todo = \
-                        self._drain_step(A, ids, area, done, edge_todo)
-    #                figure(1);clf();imshow(area, interpolation='none');colorbar()
-    #                figure(2);clf();imshow(ids.reshape(area.shape), interpolation='none');colorbar()
-    #                figure(3);clf();imshow(done, interpolation='none');colorbar()
-                done_ = done.ravel()
-            #%%
+            area_, done_, edge_todo_, edge_todo_no_mask_ = cyutils.drain_area(
+                area_, done_, ids,
+                A.indptr, A.indices, A.data, B.indptr, B.indices,
+                area.shape[0], area.shape[1],
+                edge_todo_, edge_todo_no_mask_)
+
             ids[:] = False
             max_elev = (data_ * (~done_)).max()
             ids[((data_ * (~done_) - max_elev) / max_elev > -0.01)] = True
 
-        if CYTHON:
-            area = area_.reshape(area.shape)
-            done = done_.reshape(done.shape)
-            edge_todo = edge_todo_.reshape(edge_todo.shape).astype(bool)
-            edge_todo_no_mask = edge_todo_no_mask_.reshape(edge_todo_no_mask.shape).astype(bool)
+        # Unpack from CYTHON function
+        area = area_.reshape(area.shape)
+        done = done_.reshape(done.shape)
+        edge_todo = edge_todo_.reshape(edge_todo.shape).astype(bool)
+        edge_todo_no_mask = edge_todo_no_mask_.reshape(edge_todo_no_mask.shape).astype(bool)
 
         area[flats] = np.nan
 
