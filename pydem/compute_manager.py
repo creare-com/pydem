@@ -115,16 +115,27 @@ def calc_uca_ec(fn, out_fn_uca, out_fn_todo, out_fn_done, out_fn, out_slice, edg
         done_file = zarr.open(out_fn_done, mode='a')
         todo_file = zarr.open(out_fn_todo, mode='a')
 
-        # get the edge data
-        edge_init_data = {key: uca_file[edge_slice[key]] for key in edge_slice.keys()}
-        edge_init_done = {key: done_file[edge_slice[key]] for key in edge_slice.keys()}
-        edge_init_todo = {key: todo_file[out_slice][EDGE_SLICES[key]] for key in edge_slice.keys()}
-        edge_init_todo_neighbor = {key: todo_file[edge_slice[key]] for key in edge_slice.keys()}
+        # get the edge data for the sides
+        keys = ['left', 'right', 'top', 'bottom']
+        edge_init_data = {key: uca_file[edge_slice[key]] for key in keys}
+        edge_init_done = {key: done_file[edge_slice[key]] for key in keys}
+        edge_init_todo = {key: todo_file[out_slice][EDGE_SLICES[key]] for key in keys}
+        edge_init_todo_neighbor = {key: todo_file[edge_slice[key]] for key in keys}
+        
+        # Add in the data for the corners
+        keys = ['top-left', 'bottom-right', 'top-right', 'bottom-left']
+        for key in keys:
+            key2 = key.split('-')[1]
+            ind = EDGE_SLICES[key][0]
+            edge_init_done[key2][ind] |= done_file[edge_slice[key]]
+            # TODO is in the current tile, and should be the same
+            #edge_init_todo[key2][ind] |= todo_file[edge_slice[key]]
+            edge_init_todo_neighbor[key2][ind] |= todo_file[edge_slice[key]]
+            edge_init_data[key2][ind] += uca_file[edge_slice[key]] * edge_init_done[key2][ind]
 
         # fix my TODO if my neitghbor has TODO on the same edge -- that should never happen except for floating point
         # rounding errors
         edge_init_todo = {k: v & (edge_init_todo_neighbor[k] == False) for k, v in edge_init_todo.items()}
-
 
         dp.calc_uca(uca_init=uca_init, edge_init_data=[edge_init_data, edge_init_done, edge_init_todo])
         save_result(dp.uca.astype(np.float32), out_fn_uca, out_slice)
@@ -711,31 +722,36 @@ class ProcessManager(tl.HasTraits):
         # Non-parallel case (useful for debuggin)
         if self.n_workers == 1:
             I_old = np.zeros_like(I)
+            count = 0
             while np.any(I_old != I):
+                count += 1
+                print('Count{}'.format(count))
                 s = calc_uca_ec(**kwds[I[0]])
+                if s[0] == 0:
+                    print (s[1])
                 I_old[:] = I[:]
                 mets, I = check_mets([I[0]])
-                if self._debug:
-                    from matplotlib.pyplot import figure, subplot, pcolor, title, pause, axis, colorbar, clim, show
+                if self._debug and count >= 88:
+                    from matplotlib.pyplot import figure, subplot, pcolormesh, title, pause, axis, colorbar, clim, show
                     figure(figsize=(8, 4), dpi=200)
                     subplot(221)
-                    pcolor(self.out_file['uca'][:])
-                    title('uca [{}] --> [{}]'.format(I_old[0], I[0]))
+                    pcolormesh(self.out_file['uca'][:])
+                    title('uca({}) [{}] --> [{}]'.format(count, I_old[0], I[0]))
                     axis('scaled')
                     subplot(222)
-                    pcolor(self.out_file['edge_todo'][:] *2.0 + self.out_file['edge_done'][:] *1.0, cmap='jet')
+                    pcolormesh(self.out_file['edge_todo'][:] *2.0 + self.out_file['edge_done'][:] *1.0, cmap='jet')
                     title('edge_done (1) edge_todo (2)')
                     axis('scaled')
                     clim(0, 3)
                     colorbar()
                     subplot(223)
-                    pcolor(self.out_file['edge_todo'][:] *2.0 + self.out_file['edge_done'][:] *1.0 + self.out_file['slope'][:], cmap='jet')
+                    pcolormesh(self.out_file['edge_todo'][:] *2.0 + self.out_file['edge_done'][:] *1.0 + self.out_file['slope'][:], cmap='jet')
                     title('edge_done (1) edge_todo (2) + slope')
                     axis('scaled')
                     clim(0, 3)
                     colorbar()
                     subplot(224)
-                    pcolor(self.out_file['aspect'][:]*180/np.pi, cmap='hsv')
+                    pcolormesh(self.out_file['aspect'][:]*180/np.pi, cmap='twilight')
                     title('aspect')
                     axis('scaled')
                     clim(0, 360)
@@ -760,7 +776,8 @@ class ProcessManager(tl.HasTraits):
                     s = r.get(timeout=0.001)
                     finished.append(active[i])
                     finished_res.append(i)
-                    #print(s)
+                    if s[0] == 0:
+                        print (s[1])
                 except (mpTimeoutError, TimeoutError) as e:
                     print('.', end='')
                     pass
