@@ -36,18 +36,18 @@ EDGE_SLICES = {
         'bottom-left' : (-1, 0),
         }
 
-def calc_elev_cond(fn, out_fn, out_slice):
+def calc_elev_cond(fn, out_fn, out_slice, dtype=np.float64):
     try:
         kwargs = dem_processor_from_raster_kwargs(fn)
         dp = DEMProcessor(**kwargs)
         dp.calc_fill_flats()
-        elev = dp.elev.astype(np.float32)
+        elev = dp.elev.astype(dtype)
         save_result(elev, out_fn, out_slice)
     except Exception as e:
         return (0, fn + ':' + traceback.format_exc())
     return (1, "{}: success".format(fn))
 
-def calc_aspect_slope(fn, out_fn_aspect, out_fn_slope, out_fn, out_slice):
+def calc_aspect_slope(fn, out_fn_aspect, out_fn_slope, out_fn, out_slice, dtype=np.float64):
     #if 1:
     try:
         kwargs = dem_processor_from_raster_kwargs(fn)
@@ -55,13 +55,13 @@ def calc_aspect_slope(fn, out_fn_aspect, out_fn_slope, out_fn, out_slice):
         kwargs['fill_flats'] = False  # assuming we already did this
         dp = DEMProcessor(**kwargs)
         dp.calc_slopes_directions()
-        save_result(dp.direction.astype(np.float32), out_fn_aspect, out_slice)
-        save_result(dp.mag.astype(np.float32), out_fn_slope, out_slice)
+        save_result(dp.direction.astype(dtype), out_fn_aspect, out_slice)
+        save_result(dp.mag.astype(dtype), out_fn_slope, out_slice)
     except Exception as e:
         return (0, fn + ':' + traceback.format_exc())
     return (1, "{}: success".format(fn))
 
-def calc_uca(fn, out_fn_uca, out_fn_todo, out_fn_done, out_fn, out_slice):
+def calc_uca(fn, out_fn_uca, out_fn_todo, out_fn_done, out_fn, out_slice, dtype=np.float64):
     try:
         kwargs = dem_processor_from_raster_kwargs(fn)
         kwargs['elev'] = zarr.open(out_fn, mode='a')['elev'][out_slice]
@@ -71,7 +71,7 @@ def calc_uca(fn, out_fn_uca, out_fn_todo, out_fn_done, out_fn, out_slice):
         dp = DEMProcessor(**kwargs)
         dp.find_flats()
         dp.calc_uca()
-        save_result(dp.uca.astype(np.float32), out_fn_uca, out_slice)
+        save_result(dp.uca.astype(dtype), out_fn_uca, out_slice)
         save_result(dp.edge_todo.astype(np.bool), out_fn_todo, out_slice, _test_bool)
         save_result(dp.edge_done.astype(np.bool), out_fn_done, out_slice, _test_bool)
     except Exception as e:
@@ -98,7 +98,7 @@ def calc_uca_ec_metrics(fn_uca, fn_done, fn_todo, slc, edge_slc):
         # return (n_coulddo, p_done, n_done)
         return [(p_done, n_done)]
 
-def calc_uca_ec(fn, out_fn_uca, out_fn_todo, out_fn_done, out_fn, out_slice, edge_slice):
+def calc_uca_ec(fn, out_fn_uca, out_fn_uca_edges, out_fn_todo, out_fn_done, out_fn, out_slice, edge_slice, dtype=np.float64):
     #if 1:
     try:
         kwargs = dem_processor_from_raster_kwargs(fn)
@@ -111,13 +111,14 @@ def calc_uca_ec(fn, out_fn_uca, out_fn_todo, out_fn_done, out_fn, out_slice, edg
 
         # get the initial UCA
         uca_file = zarr.open(out_fn_uca, mode='a')
-        uca_init = uca_file[out_slice]
+        uca_edges_file = zarr.open(out_fn_uca_edges, mode='a')
+        uca_edges_init = uca_edges_file[out_slice]
         done_file = zarr.open(out_fn_done, mode='a')
         todo_file = zarr.open(out_fn_todo, mode='a')
 
         # get the edge data for the sides
         keys = ['left', 'right', 'top', 'bottom']
-        edge_init_data = {key: uca_file[edge_slice[key]] for key in keys}
+        edge_init_data = {key: uca_file[edge_slice[key]] + uca_edges_file[edge_slice[key]] for key in keys}
         edge_init_done = {key: done_file[edge_slice[key]] for key in keys}
         edge_init_todo = {key: todo_file[out_slice][EDGE_SLICES[key]] for key in keys}
         edge_init_todo_neighbor = {key: todo_file[edge_slice[key]] for key in keys}
@@ -131,21 +132,21 @@ def calc_uca_ec(fn, out_fn_uca, out_fn_todo, out_fn_done, out_fn, out_slice, edg
             # TODO is in the current tile, and should be the same
             #edge_init_todo[key2][ind] |= todo_file[edge_slice[key]]
             edge_init_todo_neighbor[key2][ind] |= todo_file[edge_slice[key]]
-            edge_init_data[key2][ind] += uca_file[edge_slice[key]] * edge_init_done[key2][ind]
+            edge_init_data[key2][ind] += (uca_file[edge_slice[key]] + uca_edges_file[edge_slice[key]])* edge_init_done[key2][ind]
 
-        # fix my TODO if my neitghbor has TODO on the same edge -- that should never happen except for floating point
+        # fix my TODO if my neighbor has TODO on the same edge -- that should never happen except for floating point
         # rounding errors
         edge_init_todo = {k: v & (edge_init_todo_neighbor[k] == False) for k, v in edge_init_todo.items()}
-
-        dp.calc_uca(uca_init=uca_init, edge_init_data=[edge_init_data, edge_init_done, edge_init_todo])
-        save_result(dp.uca.astype(np.float32), out_fn_uca, out_slice)
+        #dp.calc_uca(plotflag=True)
+        dp.calc_uca(edge_init_data=[edge_init_data, edge_init_done, edge_init_todo])
+        save_result(dp.uca.astype(dtype) + uca_edges_init, out_fn_uca_edges, out_slice)
         save_result(dp.edge_todo.astype(np.bool), out_fn_todo, out_slice, _test_bool)
         save_result(dp.edge_done.astype(np.bool), out_fn_done, out_slice, _test_bool)
     except Exception as e:
         return (0, fn + ':' + traceback.format_exc())
     return (1, "{}: success".format(fn))
 
-def calc_twi(fn, out_fn_twi, out_fn, out_slice):
+def calc_twi(fn, out_fn_twi, out_fn, out_slice, dtype=np.float64):
     try:
         kwargs = dem_processor_from_raster_kwargs(fn)
         kwargs['elev'] = zarr.open(out_fn, mode='a')['elev'][out_slice]
@@ -156,7 +157,7 @@ def calc_twi(fn, out_fn_twi, out_fn, out_slice):
         dp = DEMProcessor(**kwargs)
         dp.find_flats()
         dp.calc_twi()
-        save_result(dp.twi.astype(np.float32), out_fn_twi, out_slice)
+        save_result(dp.twi.astype(dtype), out_fn_twi, out_slice)
     except Exception as e:
         return (0, fn + ':' + traceback.format_exc())
     return (1, "{}: success".format(fn))
@@ -200,9 +201,6 @@ def calc_overview(fn, out_fn, factor, in_slice, out_slice):
     return (1, (in_slice, factor))
 
 
-
-
-
 def _test_float(a, b):
     return np.any(np.abs(a - b) > 1e-8)
 
@@ -232,6 +230,17 @@ def save_result(result, out_fn, out_slice, test_func=_test_float):
 
 class ProcessManager(tl.HasTraits):
     _debug = tl.Bool(False)
+    _true_uca = tt.Array(allow_none=True)
+    _true_uca_overlap = tt.Array(allow_none=True)
+    
+    dtype = np.float64
+    
+    @tl.default('_true_uca_overlap')
+    def _true_uca_overlap_default(self):
+        _true_uca_overlap = np.zeros(self.grid_size_tot) * np.nan
+        for i in range(self.n_inputs):
+            _true_uca_overlap[self.grid_slice_unique[i]] = self._true_uca[self.grid_slice_noverlap[i]]
+        return _true_uca_overlap
 
     # Parameters controlling the computation
     grid_round_decimals = tl.Int(2)  # Number of decimals to round the lat/lon to for determining the size of the full dataset
@@ -377,11 +386,19 @@ class ProcessManager(tl.HasTraits):
         o
         n_overlap_a = 1
         n_overlap_b = 2
+        
+        
+           |b b b b
+        n n o n n n
+        a a a| 
+        
+        a a a b b b b
         '''
         n_overlap_a = int(np.round(((b - a) / da + tie - 0.01) / 2))
-        n_overlap_a = max(n_overlap_a, 1)  # max with 1 deals with the zero-overlap case
+        #n_overlap_a = max(n_overlap_a, 1)  # max with 1 deals with the zero-overlap case
         n_overlap_b = int(np.round(((b - a) / db + 1 - tie - 0.01) / 2))
         n_overlap_b = max(n_overlap_b, 1)  # max with 1 deals with the zero-overlap case
+        
         return n_overlap_a, n_overlap_b
 
     def compute_grid_overlaps(self):
@@ -523,9 +540,11 @@ class ProcessManager(tl.HasTraits):
         for key in keys:
             zf = zarr.open(os.path.join(new_fn, key),
                            shape=self.grid_size_tot_unique,
-                           chunks=chunks, mode='a', dtype=np.float32)
+                           chunks=chunks, mode='a', dtype=self.dtype)
             for i in range(self.n_inputs):
                 zf[self.grid_slice_noverlap[i]] = self.out_file[key][self.grid_slice_unique[i]]
+                if key == 'uca':
+                    zf[self.grid_slice_noverlap[i]] += self.out_file[key + '_edges'][self.grid_slice_unique[i]]
 
         self.out_file_noverlap = zarr.open(new_fn)
         self.out_path_noverlap = new_fn
@@ -569,7 +588,7 @@ class ProcessManager(tl.HasTraits):
 
         # Making a new file with the required shape/size
         print("Making a new file with shape {} --> {} and chunks {} --> {}".format(shape, new_shape, chunks, new_chunks))
-        zf_new = zarr.open(new_file, shape=new_shape, chunks=new_chunks, mode='a', dtype=np.float32)
+        zf_new = zarr.open(new_file, shape=new_shape, chunks=new_chunks, mode='a', dtype=self.dtype)
 
         # Creating list of inputs, populate kwds
         kwds = []
@@ -594,7 +613,7 @@ class ProcessManager(tl.HasTraits):
         # TODO: Also find max, mean, and min elevation on edges
         # initialize zarr output
         out_file = os.path.join(self.out_path, 'elev')
-        zf = zarr.open(out_file, shape=self.grid_size_tot, chunks=self.grid_chunk, mode='a', dtype=np.float32)
+        zf = zarr.open(out_file, shape=self.grid_size_tot, chunks=self.grid_chunk, mode='a', dtype=self.dtype)
         out_file_success = os.path.join(self.out_path, 'success')
         success = zarr.open(out_file_success, shape=(self.n_inputs, 4), mode='a', dtype=bool)
 
@@ -610,16 +629,17 @@ class ProcessManager(tl.HasTraits):
     def process_aspect_slope(self):
         # initialize zarr output
         out_aspect = os.path.join(self.out_path, 'aspect')
-        zf = zarr.open(out_aspect, shape=self.grid_size_tot, chunks=self.grid_chunk, mode='a', dtype=np.float32)
+        zf = zarr.open(out_aspect, shape=self.grid_size_tot, chunks=self.grid_chunk, mode='a', dtype=self.dtype)
         out_slope = os.path.join(self.out_path, 'slope')
-        zf1 = zarr.open(out_slope, shape=self.grid_size_tot, chunks=self.grid_chunk, mode='a', dtype=np.float32)
+        zf1 = zarr.open(out_slope, shape=self.grid_size_tot, chunks=self.grid_chunk, mode='a', dtype=self.dtype)
 
         # populate kwds
         kwds = [dict(fn=self.elev_source_files[i],
                      out_fn_aspect=out_aspect,
                      out_fn_slope=out_slope,
                      out_fn=self.out_path,
-                     out_slice=self.grid_slice[i])
+                     out_slice=self.grid_slice[i],
+                     dtype=self.dtype)
                 for i in range(self.n_inputs)]
 
         success = self.queue_processes(calc_aspect_slope, kwds, success=self.out_file['success'][:, 1])
@@ -630,7 +650,10 @@ class ProcessManager(tl.HasTraits):
         # initialize zarr output
         out_uca = os.path.join(self.out_path, 'uca')
         zf = zarr.open(out_uca, shape=self.grid_size_tot, chunks=self.grid_chunk, mode='a',
-                dtype=np.float32)
+                dtype=self.dtype)
+        out_uca_edges = os.path.join(self.out_path, 'uca_edges')
+        zf = zarr.open(out_uca_edges, shape=self.grid_size_tot, chunks=self.grid_chunk, mode='a',
+                dtype=self.dtype, fill_value=0)
         out_edge_done = os.path.join(self.out_path, 'edge_done')
         zf1 = zarr.open(out_edge_done, shape=self.grid_size_tot, chunks=self.grid_chunk, mode='a', dtype=np.bool)
         out_edge_todo = os.path.join(self.out_path, 'edge_todo')
@@ -642,7 +665,8 @@ class ProcessManager(tl.HasTraits):
                      out_fn_todo=out_edge_todo,
                      out_fn_done=out_edge_done,
                      out_fn=self.out_path,
-                     out_slice=self.grid_slice[i])
+                     out_slice=self.grid_slice[i],
+                     dtype=self.dtype)
                 for i in range(self.n_inputs)]
 
         success = self.queue_processes(calc_uca, kwds, success=self.out_file['success'][:, 2],
@@ -661,7 +685,7 @@ class ProcessManager(tl.HasTraits):
         out_edge_todo = os.path.join(self.out_path, 'edge_todo')
         out_metrics = os.path.join(self.out_path, 'uca_edge_metrics')
         zf = zarr.open(out_metrics, shape=(self.n_inputs, 2),
-                mode='a', dtype=np.float32,
+                mode='a', dtype=self.dtype,
                 fill_value=0)
 
         kwds = [dict(
@@ -679,17 +703,20 @@ class ProcessManager(tl.HasTraits):
 
     def process_uca_edges(self):
         out_uca = os.path.join(self.out_path, 'uca')
+        out_uca_edges = os.path.join(self.out_path, 'uca_edges')
         out_edge_done = os.path.join(self.out_path, 'edge_done')
         out_edge_todo = os.path.join(self.out_path, 'edge_todo')
 
         # populate kwds
         kwds = [dict(fn=self.elev_source_files[i],
                      out_fn_uca=out_uca,
+                     out_fn_uca_edges=out_uca_edges, 
                      out_fn_todo=out_edge_todo,
                      out_fn_done=out_edge_done,
                      out_fn=self.out_path,
                      out_slice=self.grid_slice[i],
-                     edge_slice=self.edge_data[i])
+                     edge_slice=self.edge_data[i],
+                     dtype=self.dtype)
                 for i in range(self.n_inputs)]
         # update metrics and decide who goes first
         mets = self.update_uca_edge_metrics('uca')
@@ -724,39 +751,67 @@ class ProcessManager(tl.HasTraits):
             I_old = np.zeros_like(I)
             count = 0
             while np.any(I_old != I):
-                count += 1
-                print('Count{}'.format(count))
-                s = calc_uca_ec(**kwds[I[0]])
-                if s[0] == 0:
-                    print (s[1])
-                I_old[:] = I[:]
-                mets, I = check_mets([I[0]])
-                if self._debug and count >= 88:
-                    from matplotlib.pyplot import figure, subplot, pcolormesh, title, pause, axis, colorbar, clim, show
+                if self._debug:# and count >= 88:
+                    from matplotlib.pyplot import figure, subplot, pcolormesh, title, pause, axis, colorbar, clim, show, imshow
                     figure(figsize=(8, 4), dpi=200)
                     subplot(221)
-                    pcolormesh(self.out_file['uca'][:])
+                    imshow(self.out_file['uca'][:])
                     title('uca({}) [{}] --> [{}]'.format(count, I_old[0], I[0]))
                     axis('scaled')
                     subplot(222)
-                    pcolormesh(self.out_file['edge_todo'][:] *2.0 + self.out_file['edge_done'][:] *1.0, cmap='jet')
+                    imshow(self.out_file['edge_todo'][:] *2.0 + self.out_file['edge_done'][:] *1.0, cmap='jet')
                     title('edge_done (1) edge_todo (2)')
                     axis('scaled')
                     clim(0, 3)
                     colorbar()
                     subplot(223)
-                    pcolormesh(self.out_file['edge_todo'][:] *2.0 + self.out_file['edge_done'][:] *1.0 + self.out_file['slope'][:], cmap='jet')
+                    imshow(self.out_file['edge_todo'][:] *2.0 + self.out_file['edge_done'][:] *1.0 + self.out_file['slope'][:], cmap='jet')
                     title('edge_done (1) edge_todo (2) + slope')
                     axis('scaled')
                     clim(0, 3)
                     colorbar()
                     subplot(224)
-                    pcolormesh(self.out_file['aspect'][:]*180/np.pi, cmap='twilight')
-                    title('aspect')
+                    if self._true_uca is None:
+                        imshow(self.out_file['aspect'][:]*180/np.pi, cmap='twilight')
+                        title('aspect')
+                        clim(0, 360)
+                    else:
+                        imshow(self.out_file['uca'][:, :] + self.out_file['uca_edges'][:, :] - self._true_uca_overlap)
+                        title('My - True')
+                        clim(None, None)
                     axis('scaled')
-                    clim(0, 360)
                     colorbar()
+                    
+                    if self._true_uca is not None:
+                        fig = figure(figsize=(8, 4), dpi=200).number
+                        subplot(131)
+                        imshow(np.log10(np.abs(self.out_file['uca'][:, :] + self.out_file['uca_edges'][:, :] - self._true_uca_overlap)))
+                        title('My - True')
+                        colorbar()
+                        clim(None, None)
+                        axis('scaled')
+                        subplot(132)
+                        imshow(np.log10(np.abs(self.out_file['uca_edges'][:, :])))
+                        title('Edges')
+                        clim(None, None)
+                        colorbar()
+                        axis('scaled')                    
+                        subplot(133)
+                        imshow(np.log10(np.abs(self._true_uca_overlap - self.out_file['uca'][:, :])))
+                        title('True Eges')
+                        clim(None, None)
+                        colorbar()
+                        axis('scaled')                    
+                    
+                    
                     show(True)
+                count += 1
+                print('Count {}'.format(count))
+                s = calc_uca_ec(**kwds[I[0]])
+                if s[0] == 0:
+                    print (s[1])
+                I_old[:] = I[:]
+                mets, I = check_mets([I[0]])                
             return mets
 
         # create pool and queue
@@ -803,6 +858,15 @@ class ProcessManager(tl.HasTraits):
             success = [0] * len(kwds)
 
         # create pool and queue
+        if self.n_workers == 1:
+            for i, kwd in enumerate(kwds):
+                if not success[i]:
+                    s = function(**kwd)
+                    success[i] = s[0]
+                    print (s)
+            intermediate_fun()
+            return success
+        
         pool = Pool(processes=self.n_workers)
 
         # submit workers
@@ -841,13 +905,14 @@ class ProcessManager(tl.HasTraits):
         out_twi = os.path.join(self.out_path, 'twi')
         # Initialize the zarr array with the correct sized chunks
         zf = zarr.open(out_twi, shape=self.grid_size_tot, chunks=self.grid_chunk, mode='a',
-                dtype=np.float32)
+                dtype=self.dtype)
 
         # populate kwds
         kwds = [dict(fn=self.elev_source_files[i],
                      out_fn_twi=out_twi,
                      out_fn=self.out_path,
-                     out_slice=self.grid_slice[i])
+                     out_slice=self.grid_slice[i],
+                     dtype=self.dtype)
                 for i in range(self.n_inputs)]
 
         success = self.queue_processes(calc_twi, kwds, success=self.out_file['success'][:, 3])
