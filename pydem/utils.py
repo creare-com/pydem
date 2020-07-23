@@ -48,7 +48,7 @@ def dem_processor_from_raster_kwargs(fn):
     dataset = read_raster(fn)
     dx, dy = mk_dx_dy_from_geotif_layer(dataset)
     elev = dataset.read(1)
-    return dict(dX=dx, dY=dy, elev=elev)
+    return dict(dX=dx, dY=dy, elev=elev, bounds=dataset.bounds, transform=dataset.transform)
 
 def mk_transform(lat_top, lon_left, dlat, dlon, lat_lon_centered=False):
     if lat_lon_centered:
@@ -58,7 +58,12 @@ def mk_transform(lat_top, lon_left, dlat, dlon, lat_lon_centered=False):
             * rasterio.transform.Affine.scale(dlon, dlat)
     return transform
 
-def save_raster(fn, data, crs, transform):
+def save_raster(fn, data, crs, transform=None, affine=None):
+    if transform is not None:
+        transform = rasterio.Affine.from_gdal(*transform)
+    elif affine is not None:
+        transform = affine
+        
     kwargs2 = dict(
         driver="GTiff",
         height=data.shape[0],
@@ -70,7 +75,7 @@ def save_raster(fn, data, crs, transform):
         mode="w",
     )
     with rasterio.open(fn, **kwargs2) as dst:
-       r = dst.write(data, 1)
+        r = dst.write(data, 1)
     return rasterio.open(fn, mode='r') 
 
 def rename_files(files, name=None):
@@ -219,7 +224,7 @@ def mk_geotiff_obj(raster, fn, bands=1, gdal_data_type=np.float32,
     pixel_width = np.abs(lon[0] - lon[1]) / (NNj - 1.0)
 
     transform = mk_transform(max(lat), min(lon), pixel_height, pixel_width, lat_lon_centered=True)
-    r = save_raster(fn, data=raster, crs="EPSG:4326", transform=transform)
+    r = save_raster(fn, data=raster, crs="EPSG:4326", affine=transform)
 
     return r, transform
 
