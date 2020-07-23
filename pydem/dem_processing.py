@@ -66,7 +66,8 @@ from .taudem import taudem
 from .test_pydem import get_test_data, make_file_names
 from .utils import (mk_dx_dy_from_geotif_layer, get_fn,
                    make_slice, is_edge, grow_obj, find_centroid, get_distance,
-                   get_border_index, get_border_mask, get_adjacent_index)
+                   get_border_index, get_border_mask, get_adjacent_index,
+                   dem_processor_from_raster_kwargs)
 
 try:
     from .cyfuncs import cyutils
@@ -137,6 +138,17 @@ class DEMProcessor(tl.HasTraits):
 
     dX = tt.Array(None, allow_none=True)  # delta x
     dY = tt.Array(None, allow_none=True)  # delta y
+    
+    bounds = tl.List()
+    transform = tl.List()
+
+    def __init__(self, elev_fn=None, **kwargs):
+        if elev_fn:
+            kwds = (dem_processor_from_raster_kwargs(elev_fn))
+            kwds.update(kwargs)
+            kwargs = kwds
+        
+        super().__init__(**kwargs)
 
     @tl.default('dX')
     def _default_dX(self):
@@ -1475,7 +1487,7 @@ def _get_flat_ids(assigned):
     # MPU optimization:
     # Let's segment the regions and store in a sparse format
     # First, let's use where once to find all the information we want
-    ids_labels = np.arange(len(assigned.ravel()), 'int64')
+    ids_labels = np.arange(len(assigned.ravel()), dtype=np.int64)
     I = ids_labels[assigned.ravel().astype(bool)]
     labels = assigned.ravel()[I]
     # Now sort these arrays by the label to figure out where to segment
