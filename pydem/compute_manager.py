@@ -38,10 +38,15 @@ EDGE_SLICES = {
         'bottom-left' : (-1, 0),
         }
 
+DEBUG = True
+
 def calc_elev_cond(fn, out_fn, out_slice, dtype=np.float64):
     try:
         kwargs = dem_processor_from_raster_kwargs(fn)
         dp = DEMProcessor(**kwargs)
+        if DEBUG:
+            dp.dX[:] = 1
+            dp.dY[:] = 1        
         dp.calc_fill_flats()
         elev = dp.elev.astype(dtype)
         save_result(elev, out_fn, out_slice)
@@ -56,6 +61,10 @@ def calc_aspect_slope(fn, out_fn_aspect, out_fn_slope, out_fn, out_slice, dtype=
         kwargs['elev'] = zarr.open(out_fn, mode='a')['elev'][out_slice]
         kwargs['fill_flats'] = False  # assuming we already did this
         dp = DEMProcessor(**kwargs)
+        if DEBUG:
+            dp.dX[:] = 1
+            dp.dY[:] = 1        
+        
         dp.calc_slopes_directions()
         save_result(dp.direction.astype(dtype), out_fn_aspect, out_slice)
         save_result(dp.mag.astype(dtype), out_fn_slope, out_slice)
@@ -71,6 +80,10 @@ def calc_uca(fn, out_fn_uca, out_fn_todo, out_fn_done, out_fn, out_slice, dtype=
         kwargs['mag'] = zarr.open(out_fn, mode='a')['slope'][out_slice]
         kwargs['fill_flats'] = False  # assuming we already did this
         dp = DEMProcessor(**kwargs)
+        if DEBUG:
+            dp.dX[:] = 1
+            dp.dY[:] = 1        
+        
         dp.find_flats()
         dp.calc_uca()
         save_result(dp.uca.astype(dtype), out_fn_uca, out_slice)
@@ -109,6 +122,10 @@ def calc_uca_ec(fn, out_fn_uca, out_fn_uca_edges, out_fn_todo, out_fn_done, out_
         kwargs['mag'] = zarr.open(out_fn, mode='a')['slope'][out_slice]
         kwargs['fill_flats'] = False  # assuming we already did this
         dp = DEMProcessor(**kwargs)
+        if DEBUG:
+            dp.dX[:] = 1
+            dp.dY[:] = 1        
+        
         dp.find_flats()
 
         # get the initial UCA
@@ -165,6 +182,10 @@ def calc_twi(fn, out_fn_twi, out_fn, out_slice, dtype=np.float64):
         kwargs['fill_flats'] = False  # assuming we already did this
         kwargs['uca'] = zarr.open(out_fn, mode='a')['uca'][out_slice] + zarr.open(out_fn, mode='a')['uca_edges'][out_slice]
         dp = DEMProcessor(**kwargs)
+        if DEBUG:
+            dp.dX[:] = 1
+            dp.dY[:] = 1        
+        
         dp.find_flats()
         dp.calc_twi()
         save_result(dp.twi.astype(dtype), out_fn_twi, out_slice)
@@ -794,24 +815,31 @@ class ProcessManager(tl.HasTraits):
                     
                     if self._true_uca is not None:
                         fig = figure(figsize=(8, 4), dpi=200).number
-                        subplot(131)
-                        imshow(np.log10(np.abs(self.out_file['uca'][:, :] + self.out_file['uca_edges'][:, :] - self._true_uca_overlap)))
+                        subplot(221)
+                        imshow(self.out_file['uca'][:, :] + self.out_file['uca_edges'][:, :] - self._true_uca_overlap)
                         title('My - True')
                         colorbar()
                         clim(None, None)
                         axis('scaled')
-                        subplot(132)
-                        imshow(np.log10(np.abs(self.out_file['uca_edges'][:, :])))
+                        subplot(222)
+                        imshow(self.out_file['uca_edges'][:, :])
                         title('Edges')
                         clim(None, None)
                         colorbar()
                         axis('scaled')                    
-                        subplot(133)
-                        imshow(np.log10(np.abs(self._true_uca_overlap - self.out_file['uca'][:, :])))
+                        subplot(223)
+                        imshow(self._true_uca_overlap - self.out_file['uca'][:, :])
                         title('True Eges')
                         clim(None, None)
                         colorbar()
-                        axis('scaled')                    
+                        axis('scaled')
+                        subplot(224)
+                        imshow(self.out_file['uca'][:, :])
+                        title('my')
+                        clim(None, None)
+                        colorbar()
+                        axis('scaled')
+                        
                     
                     
                     show(True)
