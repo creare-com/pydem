@@ -559,11 +559,12 @@ class DEMProcessor(tl.HasTraits):
                 # To initialize and edge it needs to have data and be finished
                 uca_edge_done[val] = uca_edge_done[val] \
                     | edge_init_done[key].reshape(uca_edge_init[val].shape)
-                uca_edge_init[val] = \
-                    edge_data[key].reshape(uca_edge_init[val].shape)
-                uca_edge_init[val][~uca_edge_done[val]] = 0
+                uca_edge_init[val] += \
+                    (edge_data[key] * edge_init_done[key]).reshape(uca_edge_init[val].shape)
                 uca_edge_todo[val] = uca_edge_todo[val]\
                     | edge_init_todo[key].reshape(uca_edge_init[val].shape)
+            for key, val in slices.items():
+                uca_edge_init[val][~uca_edge_done[val]] = 0
 
         if uca_init is None:
             self.uca = np.full(self.elev.shape, FLAT_ID_INT, 'float64')
@@ -580,6 +581,8 @@ class DEMProcessor(tl.HasTraits):
             self.edge_todo = res[1]
             self.edge_done = res[2]
             self.uca = res[0]
+            # Fix the very last pixel on the edges
+            self.uca = self.fix_edge_pixels(edge_data, edge_init_done, edge_init_todo, self.uca)            
         else:
             print("Starting edge resolution round: ", end='')
             # last return value will be None: edge_
@@ -595,9 +598,8 @@ class DEMProcessor(tl.HasTraits):
             self.uca += area
             self.edge_todo = e2doi
             self.edge_done = edone
-            
-        # Fix the very last pixel on the edges
-        self.uca = self.fix_edge_pixels(edge_data, edge_init_done, edge_init_todo, self.uca)
+            self.uca = self.fix_self_edge_pixels(edge_data, edge_init_done, edge_init_todo, self.uca)
+            self.uca = self.fix_edge_pixels(edge_data, edge_init_done, edge_init_todo, self.uca, False)            
 
         print('..Done')
 
@@ -605,7 +607,7 @@ class DEMProcessor(tl.HasTraits):
         gc.collect()  # Just in case
         return self.uca
 
-    def fix_edge_pixels(self, edge_init_data, edge_init_done, edge_init_todo, uca=None):
+    def fix_edge_pixels(self, edge_init_data, edge_init_done, edge_init_todo, uca=None, initialize=True):
         """
         This function fixes the pixels on the very edge of the tile.
         Drainage is calculated if the edge is downstream from the interior.
@@ -640,11 +642,13 @@ class DEMProcessor(tl.HasTraits):
         #
         indices = {'left': [[3, 4], [2, 5]], 'right': [[0, 7], [1, 6]],
                    'top': [[1, 2], [0, 3]], 'bottom': [[5, 6], [4, 7]]}
-        indices_corners = {'top-left': [2, 3, 4], 'top-right': [0, 1, 2],
-                           'bottom-left': [4, 5, 6], 'bottom-right': [6, 7, 0]}
+        indices_corners = {'top-left': [2, 3], 'top-right': [0, 1],
+                           'bottom-left': [4, 5], 'bottom-right': [6, 7]}
 
 
         for side, slice_o, slice_d in zip(sides, slices_o, slices_d):
+            if not initialize:
+                 continue
             # self-initialize values for the edges:
             if side in ['left', 'right']:
                 uca[slice_d] = \
@@ -653,7 +657,8 @@ class DEMProcessor(tl.HasTraits):
                     .reshape(uca[slice_d].shape)
             else:
                 uca[slice_d] = dX[slice_d[0]][0] * dY[slice_d[0]][0]
-                
+
+        for side, slice_o, slice_d in zip(sides, slices_o, slices_d):
             section, proportion = \
                 self._calc_uca_section_proportion(data[slice_o],
                                                   dX[slice_o[0]],
@@ -689,6 +694,39 @@ class DEMProcessor(tl.HasTraits):
                     elif e == 1:
                         uca[slice_d][ids2r] += uca[slice_o][ids] * (1 - proportion[ids]) * noclip
 
+        # Do the corners
+        for key in indices_corners.keys():
+            # Re-initialize corner
+            
+            slice_d = []
+            slice_o = []
+            if 'top' in key:
+                slice_d.append(slice(0, 1))
+                slice_o.append(slice(1, 2))
+            else:
+                slice_d.append(slice(-1, None))
+                slice_o.append(slice(-2, -1))
+            if 'left' in key:
+                slice_d.append(slice(0, 1))
+                slice_o.append(slice(1, 2))
+            else:
+                slice_d.append(slice(-1, None))
+                slice_o.append(slice(-2, -1))
+            slice_d = tuple(slice_d)
+            slice_o = tuple(slice_o)
+            
+            uca[slice_d] = dX[slice_d[0]] * dY[slice_d[0]]
+            
+            section, proportion = \
+                self._calc_uca_section_proportion(data[slice_o],
+                                                  dX[slice_o[0]],
+                                                  dY[slice_o[0]],
+                                                  direction[slice_o],
+                                                  flats[slice_o])
+            if section.item() in indices_corners[key]:
+                uca[slice_d] +=  uca[slice_o] * (1 - proportion)
+        
+        for side, slice_o, slice_d in zip(sides, slices_o, slices_d):
             # Add the edge data from adjacent tiles
             if edge_init_done is not None:
                 ids = edge_init_done[side]  # > 0
@@ -742,14 +780,16 @@ class DEMProcessor(tl.HasTraits):
             else:
                 uca[slice_d] = dX[slice_d[0]][0] * dY[slice_d[0]][0]
         
-        for side, slice_o, slice_d in zip(sides, slices_o, slices_d):
-            # Add the edge data from adjacent tiles
-            ids = edge_init_done[side]  # > 0
-            if side in ['left', 'right']:
-                uca[slice_d][ids, :] = \
-                    edge_init_data[side][ids][:, None]
-            else:
-                uca[slice_d][:, ids] = edge_init_data[side][ids]
+        if edge_init_data is not None:
+            for side, slice_o, slice_d in zip(sides, slices_o, slices_d):
+                # Add the edge data from adjacent tiles
+                ids = edge_init_done[side]  # > 0
+                if side in ['left', 'right']:
+                    uca[slice_d][ids, :] = \
+                        edge_init_data[side][ids][:, None]
+                else:
+                    uca[slice_d][:, ids] = edge_init_data[side][ids]
+            
         
         for side, slice_o, slice_d in zip(sides, slices_o, slices_d):
             # Let's propagate data from edge-point to edge-point, but only for edges that drain INTO the interior
@@ -763,7 +803,8 @@ class DEMProcessor(tl.HasTraits):
                 ids = np.any([section == ii for ii in i], axis=0).ravel() & (data[slice_d].ravel() > spndi.minimum_filter(data[slice_o].ravel(), 3))
                 #if not any(ids):
                     #continue
-                ids = ids & ~edge_init_done[side]
+                if edge_init_data is not None:
+                    ids = ids & ~edge_init_done[side]
                 ids[-(1 + e)] = False
                 rollids = np.roll(ids, 1 - 2 * e)
                 rollids[-e] = False
@@ -872,7 +913,7 @@ class DEMProcessor(tl.HasTraits):
         if plotflag:
             self._plot_connectivity(A, (done.astype('float64') is False)
                                     + flats.astype('float64') * 2, [0, 3])        
-
+        
         return area, edge_todo_i, edge_done, edge_todo_tile
 
     def _calc_uca_chunk(self, data, dX, dY, direction, mag, flats,
