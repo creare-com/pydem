@@ -126,16 +126,23 @@ def calc_uca_ec(fn, out_fn_uca, out_fn_uca_edges, out_fn_todo, out_fn_done, out_
         edge_init_todo = {key: todo_file[out_slice][EDGE_SLICES[key]] for key in keys}
         edge_init_todo_neighbor = {key: todo_file[edge_slice[key]] for key in keys}
         
+        # Remove the corners from these data
+        #for key in keys:
+            #edge_init_data[key][0] = 0
+            #edge_init_data[key][-1] = 0
+            #edge_init_done[key][0] = False
+            #edge_init_done[key][-1] = False
+        
         # Add in the data for the corners
         #keys = ['top-left', 'bottom-right', 'top-right', 'bottom-left']
         #for key in keys:
             #key2 = key.split('-')[1]
             #ind = EDGE_SLICES[key][0]
-            #edge_init_done[key2][ind] |= done_file[edge_slice[key]]
+            #edge_init_done[key2][ind] = done_file[edge_slice[key]]
             ## TODO is in the current tile, and should be the same
             ##edge_init_todo[key2][ind] |= todo_file[edge_slice[key]]
-            #edge_init_todo_neighbor[key2][ind] |= todo_file[edge_slice[key]]
-            #edge_init_data[key2][ind] += (uca_file[edge_slice[key]] + uca_edges_file[edge_slice[key]])* edge_init_done[key2][ind]
+            #edge_init_todo_neighbor[key2][ind] = todo_file[edge_slice[key]]
+            #edge_init_data[key2][ind] = (uca_file[edge_slice[key]] + uca_edges_file[edge_slice[key]])
 
         # fix my TODO if my neighbor has TODO on the same edge -- that should never happen except for floating point
         # rounding errors

@@ -395,6 +395,11 @@ class DEMProcessor(tl.HasTraits):
         if self.fill_flats_below_sea: sea_mask = data != 0
         else: sea_mask = data > 0
         flat = (spndi.minimum_filter(data, (3, 3)) >= data) & sea_mask
+        # Exclude corners
+        flat[0, 0] = False
+        flat[-1, 0] = False
+        flat[0, -1] = False
+        flat[-1, -1] = False
         # TODO minimum filter behavior with nans?
         flats, n = spndi.label(flat, structure=FLATS_KERNEL3)
         objs = spndi.find_objects(flats)
@@ -543,9 +548,9 @@ class DEMProcessor(tl.HasTraits):
         uca_edge_init = np.zeros(self.elev.shape, 'float64')
         uca_edge_done = np.zeros(self.elev.shape, bool)
         uca_edge_todo = np.zeros(self.elev.shape, bool)
-        edge_init_done, edge_init_todo = None, None
+        edge_data, edge_init_todo, edge_init_done = [None] * 3
         if edge_init_data is not None:
-            edge_init_data, edge_init_done, edge_init_todo = edge_init_data
+            edge_data, edge_init_done, edge_init_todo = edge_init_data
             slices = {'left': (slice(None), slice(0, 1)),
                       'right': (slice(None), slice(-1, None)),
                       'top': (slice(0, 1), slice(None)),
@@ -555,7 +560,7 @@ class DEMProcessor(tl.HasTraits):
                 uca_edge_done[val] = uca_edge_done[val] \
                     | edge_init_done[key].reshape(uca_edge_init[val].shape)
                 uca_edge_init[val] = \
-                    edge_init_data[key].reshape(uca_edge_init[val].shape)
+                    edge_data[key].reshape(uca_edge_init[val].shape)
                 uca_edge_init[val][~uca_edge_done[val]] = 0
                 uca_edge_todo[val] = uca_edge_todo[val]\
                     | edge_init_todo[key].reshape(uca_edge_init[val].shape)
@@ -583,14 +588,16 @@ class DEMProcessor(tl.HasTraits):
                                             self.direction, self.mag,
                                             self.flats,
                                             area_edges=uca_edge_init,
+                                            edge_init=uca_edge_init,
                                             edge_todo=uca_edge_todo,
-                                            edge_done=uca_edge_done)
+                                            edge_done=uca_edge_done,
+                                            edge_init_data=edge_init_data)
             self.uca += area
             self.edge_todo = e2doi
             self.edge_done = edone
             
         # Fix the very last pixel on the edges
-        self.fix_edge_pixels(edge_init_data, edge_init_done, edge_init_todo)
+        self.uca = self.fix_edge_pixels(edge_data, edge_init_done, edge_init_todo, self.uca)
 
         print('..Done')
 
@@ -598,7 +605,7 @@ class DEMProcessor(tl.HasTraits):
         gc.collect()  # Just in case
         return self.uca
 
-    def fix_edge_pixels(self, edge_init_data, edge_init_done, edge_init_todo):
+    def fix_edge_pixels(self, edge_init_data, edge_init_done, edge_init_todo, uca=None):
         """
         This function fixes the pixels on the very edge of the tile.
         Drainage is calculated if the edge is downstream from the interior.
@@ -611,6 +618,8 @@ class DEMProcessor(tl.HasTraits):
         """
         data, dX, dY, direction, flats = \
             self.elev, self.dX, self.dY, self.direction, self.flats
+        if uca is None:
+            uca = self.uca
         sides = ['left', 'right', 'top', 'bottom']
         # Nodes that will drain their contributions
         slices_o = ((slice(None), slice(1, 2)), (slice(None), slice(-2, -1)),
@@ -631,17 +640,11 @@ class DEMProcessor(tl.HasTraits):
         #
         indices = {'left': [[3, 4], [2, 5]], 'right': [[0, 7], [1, 6]],
                    'top': [[1, 2], [0, 3]], 'bottom': [[5, 6], [4, 7]]}
+        indices_corners = {'top-left': [2, 3, 4], 'top-right': [0, 1, 2],
+                           'bottom-left': [4, 5, 6], 'bottom-right': [6, 7, 0]}
 
 
         for side, slice_o, slice_d in zip(sides, slices_o, slices_d):
-            # Figure out which section the drainage goes towards, and what
-            # proportion goes to the straight-sided (as opposed to diagonal) node.
-            section, proportion = \
-                self._calc_uca_section_proportion(data[slice_o],
-                                                  dX[slice_o[0]],
-                                                  dY[slice_o[0]],
-                                                  direction[slice_o],
-                                                  flats[slice_o])
             # self-initialize values for the edges:
             if side in ['left', 'right']:
                 self.uca[slice_d] = \
@@ -650,28 +653,43 @@ class DEMProcessor(tl.HasTraits):
                     .reshape(self.uca[slice_d].shape)
             else:
                 self.uca[slice_d] = dX[slice_d[0]][0] * dY[slice_d[0]][0]
+                
+            section, proportion = \
+                self._calc_uca_section_proportion(data[slice_o],
+                                                  dX[slice_o[0]],
+                                                  dY[slice_o[0]],
+                                                  direction[slice_o],
+                                                  flats[slice_o])
             # Loop over the different types of draining quadrants
             for e in range(2):
                 for i in indices[side][e]:
                     ed = self.facets[i][2]
-                    ids = section == i
-                    ids2r = ids.copy() # This structure will store the offset needed for the edge draining
+                    ids = np.where(section == i)
+                    if ids[0].size == 0:
+                         continue
+                    ids2ri = [ids[0].copy(), ids[1].copy()] # This structure will store the offset needed for the edge draining
+                    ids2r = [ids[0].copy(), ids[1].copy()] # This structure will store the offset needed for the edge draining
                     # fix edges
                     if side in ['left', 'right']:
-                        ids2r[(ed[0] == 1):-1 - (ed[0] != 1), :] = ids[(ed[0] == -1):-1 - (ed[0] != -1), :]
+                        ids2ri[0] -= ed[0]
+                        # Exclude corners
+                        ids2r[0] = np.clip(ids2ri[0], 1, self.uca.shape[0] - 2)
+                        noclip = ids2r[0] == ids2ri[0]
                     else:
-                        ids2r[:, (ed[1] == 1):-1 - (ed[1] != 1)] = ids[:, (ed[1] == -1):-1 - (ed[1] != -1)]
-                    
-                    # This third index is needed in case a "True" at the corner gets overwritten as
-                    # A False, which means there are now fewer pixels to drain to. 
-                    ids2 = np.roll(np.roll(ids2r, -ed[0], axis=0), -ed[1], axis=1)
+                        ids2ri[1] -= ed[1]
+                        ids2r[1] = np.clip(ids2ri[1], 1, self.uca.shape[1] - 2)
+                        # Exclude corners
+                        noclip = ids2r[1] == ids2ri[1]
+                        
+                    ids2r = tuple(ids2r)
+
                     if e == 0:
                         self.uca[slice_d][ids] += self.uca[slice_o][ids] * proportion[ids]
-                        self.uca[slice_d][ids2r] += self.uca[slice_o][ids2] * (1 - proportion[ids2])
-                    if e == 1:
-                        self.uca[slice_d][ids2r] += self.uca[slice_o][ids2] * (1 - proportion[ids2])
+                        self.uca[slice_d][ids] += self.uca[slice_o][ids2r] * (1 - proportion[ids2r]) * noclip
+                    elif e == 1:
+                        self.uca[slice_d][ids] += self.uca[slice_o][ids2r] * (1 - proportion[ids2r]) * noclip
 
-            # Finally, add the edge data from adjacent tiles
+            # Add the edge data from adjacent tiles
             if edge_init_done is not None:
                 ids = edge_init_done[side]  # > 0
                 if side in ['left', 'right']:
@@ -679,9 +697,96 @@ class DEMProcessor(tl.HasTraits):
                         edge_init_data[side][ids][:, None]
                 else:
                     self.uca[slice_d][:, ids] = edge_init_data[side][ids]
+        return uca
+        
+    def fix_self_edge_pixels(self, edge_init_data, edge_init_done, edge_init_todo, uca=None):
+        """
+        This function fixes the pixels on the very edge of the tile by following draining along the edge itself
+        It handles edge to edge contributions only. 
+        """
+        data, dX, dY, direction, flats = \
+            self.elev, self.dX, self.dY, self.direction, self.flats
+        if uca is None:
+            uca = self.uca
+        sides = ['left', 'right', 'top', 'bottom']
+        # Nodes that will drain their contributions
+        slices_o = ((slice(None), slice(1, 2)), (slice(None), slice(-2, -1)),
+                    (slice(1, 2), slice(None)), (slice(-2, -1), slice(None)))
+        # Edges that will receive the contributions
+        slices_d = ((slice(None), slice(0, 1)), (slice(None), slice(-1, None)),
+                    (slice(0, 1), slice(None)), (slice(-1, None), slice(None)))
+
+        # The first set of edges will have contributions from two nodes whereas
+        # the second set of edges will only have contributinos from one node
+        # Each interior node drains to an edge node in one of these configurations
+        #              ^ ^  ^^
+        #             \ \|  |/ 
+        #            <-3 2 1 /
+        #            <-4   0 ->   
+        #             /5 6 7 -> 
+        #             /| |\ \
+        #
+
+        indices_self = {'left': [[5, 6], [1, 2]],
+                        'top': [[0, 7], [3, 4]]}
+        indices_self['right'] = indices_self['left']
+        indices_self['bottom'] = indices_self['top']
+
+        for side, slice_o, slice_d in zip(sides, slices_o, slices_d):
+            # self-initialize values for the edges:
+            if side in ['left', 'right']:
+                uca[slice_d] = \
+                    np.concatenate(([dX[slice_d[0]][0] * dY[slice_d[0]][0]],
+                                    dX[slice_d[0]] * dY[slice_d[0]]))\
+                    .reshape(uca[slice_d].shape)
+            else:
+                uca[slice_d] = dX[slice_d[0]][0] * dY[slice_d[0]][0]
+        
+        for side, slice_o, slice_d in zip(sides, slices_o, slices_d):
+            # Add the edge data from adjacent tiles
+            ids = edge_init_done[side]  # > 0
+            if side in ['left', 'right']:
+                uca[slice_d][ids, :] = \
+                    edge_init_data[side][ids][:, None]
+            else:
+                uca[slice_d][:, ids] = edge_init_data[side][ids]
+        
+        for side, slice_o, slice_d in zip(sides, slices_o, slices_d):
+            # Let's propagate data from edge-point to edge-point, but only for edges that drain INTO the interior
+            section, proportion = self._calc_uca_section_proportion(
+                data[slice_d], dX[slice_d[0]], dY[slice_d[0]], direction[slice_d], flats[slice_d])
+
+            proportion = proportion.ravel()
+            # Loop over the different types of draining quadrants
+            for e in range(2):
+                i = indices_self[side][e]
+                ids = np.any([section == ii for ii in i], axis=0).ravel() & (data[slice_d].ravel() > spndi.minimum_filter(data[slice_o].ravel(), 3))
+                #if not any(ids):
+                    #continue
+                ids = ids & ~edge_init_done[side]
+                ids[-(1 + e)] = False
+                rollids = np.roll(ids, 1 - 2 * e)
+                rollids[-e] = False
+                val = np.zeros(ids.size)
+                start_val = None
+                for k in range((val.size - 1) * e, val.size * (1 - e) - e, 1 - 2 * e):
+                    if ids[k] and not rollids[k]:
+                        start_val = uca[slice_d].ravel()[k] * proportion[k]
+                        continue
+                    if start_val is None:
+                        continue
+                    val[k] = start_val
+                    if rollids[k]:
+                        start_val = (start_val + uca[slice_d].ravel()[k]) * proportion[k]
+                        if not ids[k]:
+                            start_val = None
+                
+                uca[slice_d] += val.reshape(section.shape)
+        return uca
+    
 
     def _calc_uca_chunk_update(self, data, dX, dY, direction, mag, flats,
-                               area_edges=None, edge_todo=None, edge_done=None,
+                               area_edges=None, edge_init=None, edge_todo=None, edge_done=None, edge_init_data=None,
                                plotflag=False):
         """
         Calculates the upstream contributing area due to contributions from
@@ -722,6 +827,9 @@ class DEMProcessor(tl.HasTraits):
 
         done = np.ones(data.shape, bool)
         done.ravel()[ids] = False
+        
+        # Drain edges that come from exterior to itself
+        area = self.fix_self_edge_pixels(edge_init_data[0], edge_init_data[1], edge_init_data[2], uca=area)
 
         a = cyutils.drain_connections(
             done.ravel(), ids, B.indptr, B.indices, set_to=False)
@@ -787,11 +895,20 @@ class DEMProcessor(tl.HasTraits):
         ids = colsum == 0  # If no one drains into me
 
         area = (dX * dY)
+        area = np.concatenate((area[0:1], area)).reshape(area.size+1, 1)
+        
+        #area = ((dX[1:] + dX[:-1]) / 2 * (dY[1:] + dY[:-1]) / 2)
+        #dX0 = (dX[0] - (dX[1] - dX[0]) + dX[0]) / 2
+        #dX0 = (3 * dX[0] - dX[1]) / 2
+        #dY0 = (3 * dX[0] - dX[1]) / 2
+        #area0 = dX0 * dY0
+        #areaN = (3 * dX[-1] - dX[-2]) / 2 * (3 * dX[-1] - dX[-2]) / 2
+        #area = np.concatenate(([area0], area, [areaN])).reshape(area.size+2, 1)
+
         # Record minimum area
         min_area = np.nanmin(area)
         self.twi_min_area = min(self.twi_min_area, min_area)
-
-        area = np.concatenate((area[0:1], area)).reshape(area.size+1, 1)
+        
         area = area.repeat(data.shape[1], 1)
         # Set the edge areas to zero, will add those contributions later
         area[:, 0] = area_edges[:, 0]
@@ -1621,8 +1738,10 @@ def _tarboton_slopes_directions(data, dX, dY, facets, ang_adj):
         e1 = facets[ind][1]
         e2 = facets[ind][2]
         ang = ang_adj[ind]
-        slc1 = (slice(e1[0], 1 + e1[0]), slice(e1[1], 1 + e1[1]))
-        slc2 = (slice(e2[0], 1 + e2[0]), slice(e2[1], 1 + e2[1]))
+        slc1 = (slice(e1[0], 1 + e1[0]),
+                slice(e1[1], 1 + e1[1]))
+        slc2 = (slice(e2[0], 1 + e2[0]),
+                slice(e2[1], 1 + e2[1]))
         d1, d2, theta = _get_d1_d2(dX, dY, ind, e1, e2, shp, 'top')
         mag, direction = _calc_direction(data, mag, direction, ang, d1, d2,
                                          theta, slc0, slc1, slc2)
