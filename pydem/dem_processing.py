@@ -171,7 +171,22 @@ class DEMProcessor(tl.HasTraits):
     maximum_pit_area = tl.Float(32)
 
     # The pixel coordinates for the different facets used to calculate the
-    # D_infty magnitude and direction (from Tarboton)
+    # D_infty magnitude and direction (from Tarboton) uses ij, not xy coordinates
+    #  -1,-1 -1,0  -1,1
+    #        \ |  /
+    #         \|/
+    # 0,-1 -- 0,0 -- 0,1
+    #         /|\
+    #       /  |  \
+    #  1,-1   1,0   1,1
+    #
+    #       [2] [1] 
+    #        \ |  /
+    #    [3]  \|/  [0]
+    #      --     -- 
+    #    [4]  /|\  [7]
+    #       /  |  \
+    #       [5] [6]
     facets = tl.List([
              [(0, 0), (0, 1), (-1, 1)],
              [(0, 0), (-1, 0), (-1, 1)],
@@ -539,7 +554,7 @@ class DEMProcessor(tl.HasTraits):
                 # To initialize and edge it needs to have data and be finished
                 uca_edge_done[val] = uca_edge_done[val] \
                     | edge_init_done[key].reshape(uca_edge_init[val].shape)
-                uca_edge_init[val] += \
+                uca_edge_init[val] = \
                     edge_init_data[key].reshape(uca_edge_init[val].shape)
                 uca_edge_init[val][~uca_edge_done[val]] = 0
                 uca_edge_todo[val] = uca_edge_todo[val]\
@@ -745,6 +760,10 @@ class DEMProcessor(tl.HasTraits):
 
         area[flats] = np.nan
         edge_done = ~edge_todo
+        
+        if plotflag:
+            self._plot_connectivity(A, (done.astype('float64') is False)
+                                    + flats.astype('float64') * 2, [0, 3])        
 
         return area, edge_todo_i, edge_done, edge_todo_tile
 
@@ -1635,7 +1654,7 @@ def _tarboton_slopes_directions(data, dX, dY, facets, ang_adj):
                                          theta, slc0, slc1, slc2)
     # bottom-right corner
     slc0 = (slice(-1, None), slice(-1, None))
-    for ind in [3, 4]:
+    for ind in [2, 3]:
         e1 = facets[ind][1]
         e2 = facets[ind][2]
         ang = ang_adj[ind]
@@ -1694,6 +1713,10 @@ def _calc_direction(data, mag, direction, ang, d1, d2, theta,
     This function gives the magnitude and direction of the slope based on
     Tarboton's D_\\infty method. This is a helper-function to
     _tarboton_slopes_directions
+    
+    slc0 is the point where the slope is being determined
+    slc1 is a slice of the data giving the 'd1' direction
+    slc2 is a slice of the data giving the 'd2' dirction
     """
 
     data0 = data[slc0]
