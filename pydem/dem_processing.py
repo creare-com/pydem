@@ -647,12 +647,12 @@ class DEMProcessor(tl.HasTraits):
         for side, slice_o, slice_d in zip(sides, slices_o, slices_d):
             # self-initialize values for the edges:
             if side in ['left', 'right']:
-                self.uca[slice_d] = \
+                uca[slice_d] = \
                     np.concatenate(([dX[slice_d[0]][0] * dY[slice_d[0]][0]],
                                     dX[slice_d[0]] * dY[slice_d[0]]))\
-                    .reshape(self.uca[slice_d].shape)
+                    .reshape(uca[slice_d].shape)
             else:
-                self.uca[slice_d] = dX[slice_d[0]][0] * dY[slice_d[0]][0]
+                uca[slice_d] = dX[slice_d[0]][0] * dY[slice_d[0]][0]
                 
             section, proportion = \
                 self._calc_uca_section_proportion(data[slice_o],
@@ -671,32 +671,32 @@ class DEMProcessor(tl.HasTraits):
                     ids2r = [ids[0].copy(), ids[1].copy()] # This structure will store the offset needed for the edge draining
                     # fix edges
                     if side in ['left', 'right']:
-                        ids2ri[0] -= ed[0]
+                        ids2ri[0] += ed[0]
                         # Exclude corners
-                        ids2r[0] = np.clip(ids2ri[0], 1, self.uca.shape[0] - 2)
+                        ids2r[0] = np.clip(ids2ri[0], 0, uca.shape[0] - 1)
                         noclip = ids2r[0] == ids2ri[0]
                     else:
-                        ids2ri[1] -= ed[1]
-                        ids2r[1] = np.clip(ids2ri[1], 1, self.uca.shape[1] - 2)
+                        ids2ri[1] += ed[1]
+                        ids2r[1] = np.clip(ids2ri[1], 0, uca.shape[1] - 1)
                         # Exclude corners
                         noclip = ids2r[1] == ids2ri[1]
                         
                     ids2r = tuple(ids2r)
 
                     if e == 0:
-                        self.uca[slice_d][ids] += self.uca[slice_o][ids] * proportion[ids]
-                        self.uca[slice_d][ids] += self.uca[slice_o][ids2r] * (1 - proportion[ids2r]) * noclip
+                        uca[slice_d][ids] += uca[slice_o][ids] * proportion[ids]
+                        uca[slice_d][ids2r] += uca[slice_o][ids] * (1 - proportion[ids]) * noclip
                     elif e == 1:
-                        self.uca[slice_d][ids] += self.uca[slice_o][ids2r] * (1 - proportion[ids2r]) * noclip
+                        uca[slice_d][ids2r] += uca[slice_o][ids] * (1 - proportion[ids]) * noclip
 
             # Add the edge data from adjacent tiles
             if edge_init_done is not None:
                 ids = edge_init_done[side]  # > 0
                 if side in ['left', 'right']:
-                    self.uca[slice_d][ids, :] = \
+                    uca[slice_d][ids, :] = \
                         edge_init_data[side][ids][:, None]
                 else:
-                    self.uca[slice_d][:, ids] = edge_init_data[side][ids]
+                    uca[slice_d][:, ids] = edge_init_data[side][ids]
         return uca
         
     def fix_self_edge_pixels(self, edge_init_data, edge_init_done, edge_init_todo, uca=None):
