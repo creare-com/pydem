@@ -4,6 +4,8 @@
 # TODO: Ensure that 'success' is written out to a file.
 # TODO: Clean up filenames -- should be attributes of class
 # TODO: Make a final seamless result with no overlaps -- option to save out to GeoTIFF, and quantize data for cheaper storage
+# TODO: Fix the whole dX dY debacle 
+# TODO: Need to pass along user defined KWARGS
 
 import os
 import traceback
@@ -111,6 +113,7 @@ def calc_uca_ec(fn, out_fn_uca, out_fn_uca_edges, out_fn_todo, out_fn_done, out_
 
         # get the initial UCA
         uca_file = zarr.open(out_fn_uca, mode='a')
+        uca_init = uca_file[out_slice]
         uca_edges_file = zarr.open(out_fn_uca_edges, mode='a')
         uca_edges_init = uca_edges_file[out_slice]
         done_file = zarr.open(out_fn_done, mode='a')
@@ -124,27 +127,27 @@ def calc_uca_ec(fn, out_fn_uca, out_fn_uca_edges, out_fn_todo, out_fn_done, out_
         edge_init_todo_neighbor = {key: todo_file[edge_slice[key]] for key in keys}
         
         # Add in the data for the corners
-        keys = ['top-left', 'bottom-right', 'top-right', 'bottom-left']
-        for key in keys:
-            key2 = key.split('-')[1]
-            ind = EDGE_SLICES[key][0]
-            edge_init_done[key2][ind] |= done_file[edge_slice[key]]
-            # TODO is in the current tile, and should be the same
-            #edge_init_todo[key2][ind] |= todo_file[edge_slice[key]]
-            edge_init_todo_neighbor[key2][ind] |= todo_file[edge_slice[key]]
-            edge_init_data[key2][ind] += (uca_file[edge_slice[key]] + uca_edges_file[edge_slice[key]])* edge_init_done[key2][ind]
+        #keys = ['top-left', 'bottom-right', 'top-right', 'bottom-left']
+        #for key in keys:
+            #key2 = key.split('-')[1]
+            #ind = EDGE_SLICES[key][0]
+            #edge_init_done[key2][ind] |= done_file[edge_slice[key]]
+            ## TODO is in the current tile, and should be the same
+            ##edge_init_todo[key2][ind] |= todo_file[edge_slice[key]]
+            #edge_init_todo_neighbor[key2][ind] |= todo_file[edge_slice[key]]
+            #edge_init_data[key2][ind] += (uca_file[edge_slice[key]] + uca_edges_file[edge_slice[key]])* edge_init_done[key2][ind]
 
         # fix my TODO if my neighbor has TODO on the same edge -- that should never happen except for floating point
         # rounding errors
         edge_init_todo = {k: v & (edge_init_todo_neighbor[k] == False) for k, v in edge_init_todo.items()}
         #dp.calc_uca(plotflag=True)
-        dp.calc_uca(edge_init_data=[edge_init_data, edge_init_done, edge_init_todo])
-        save_result(dp.uca.astype(dtype) + uca_edges_init, out_fn_uca_edges, out_slice)
+        uca = dp.calc_uca(uca_init=uca_init + uca_edges_init, edge_init_data=[edge_init_data, edge_init_done, edge_init_todo])
+        save_result((dp.uca - uca_init).astype(dtype), out_fn_uca_edges, out_slice)
         save_result(dp.edge_todo.astype(np.bool), out_fn_todo, out_slice, _test_bool)
         save_result(dp.edge_done.astype(np.bool), out_fn_done, out_slice, _test_bool)
     except Exception as e:
-        return (0, fn + ':' + traceback.format_exc())
-    return (1, "{}: success".format(fn))
+        return (0, fn + ':' + traceback.format_exc(), None)
+    return (1, "{}: success".format(fn), uca)
 
 def calc_twi(fn, out_fn_twi, out_fn, out_slice, dtype=np.float64):
     try:
@@ -396,7 +399,7 @@ class ProcessManager(tl.HasTraits):
         '''
         n_overlap_a = int(np.round(((b - a) / da + tie - 0.01) / 2))
         #n_overlap_a = max(n_overlap_a, 1)  # max with 1 deals with the zero-overlap case
-        n_overlap_b = int(np.round(((b - a) / db + 1 - tie - 0.01) / 2))
+        n_overlap_b = int(np.round((b - a) / db))
         n_overlap_b = max(n_overlap_b, 1)  # max with 1 deals with the zero-overlap case
         
         return n_overlap_a, n_overlap_b
@@ -499,8 +502,8 @@ class ProcessManager(tl.HasTraits):
                     'left': (slc[0], slc[1].start - lon_start_e),
                     'right': (slc[0], slc[1].stop + lon_end_e - 1),
                     'top': (slc[0].start - lat_start_e, slc[1]),
-                    'top-left': (slc[0].stop + lat_end_e * corner_tl - 1, slc[1].start - lon_start_e * corner_tl),
-                    'top-right': (slc[0].stop + lat_end_e  * corner_tr - 1, slc[1].stop + lon_end_e  * corner_tr - 1),                    
+                    'top-left': (slc[0].start - lat_start_e * corner_tl, slc[1].start - lon_start_e * corner_tl),
+                    'top-right': (slc[0].start - lat_start_e  * corner_tr, slc[1].stop + lon_end_e * corner_tr - 1),                    
                     'bottom': (slc[0].stop + lat_end_e - 1, slc[1]),
                     'bottom-left': (slc[0].stop + lat_end_e * corner_bl - 1, slc[1].start - lon_start_e * corner_bl),
                     'bottom-right': (slc[0].stop + lat_end_e * corner_br - 1, slc[1].stop + lon_end_e * corner_br - 1),
