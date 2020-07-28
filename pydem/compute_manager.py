@@ -143,23 +143,45 @@ def calc_uca_ec(fn, out_fn_uca, out_fn_uca_edges, out_fn_todo, out_fn_done, out_
         edge_init_todo = {key: todo_file[out_slice][EDGE_SLICES[key]] for key in keys}
         edge_init_todo_neighbor = {key: todo_file[edge_slice[key]] for key in keys}
         
-        # Remove the corners from these data
-        #for key in keys:
-            #edge_init_data[key][0] = 0
-            #edge_init_data[key][-1] = 0
-            #edge_init_done[key][0] = False
-            #edge_init_done[key][-1] = False
-        
-        # Add in the data for the corners
-        #keys = ['top-left', 'bottom-right', 'top-right', 'bottom-left']
-        #for key in keys:
-            #key2 = key.split('-')[1]
-            #ind = EDGE_SLICES[key][0]
-            #edge_init_done[key2][ind] = done_file[edge_slice[key]]
-            ## TODO is in the current tile, and should be the same
-            ##edge_init_todo[key2][ind] |= todo_file[edge_slice[key]]
-            #edge_init_todo_neighbor[key2][ind] = todo_file[edge_slice[key]]
-            #edge_init_data[key2][ind] = (uca_file[edge_slice[key]] + uca_edges_file[edge_slice[key]])
+        # Add in the data for the corners -- for the single-pixel overlap case
+        keys = ['top-left', 'bottom-right', 'top-right', 'bottom-left']
+        for key in keys:
+            # Note, the dem_processor doesn't know about incoming corners, so all changes have to happen on edges
+            keytb, keylr = key.split('-')
+            inds = EDGE_SLICES[key]
+            overlap = edge_init_done[keytb][inds[1]] & edge_init_done[keylr][inds[0]]
+            # We will be double-dipping on the corner, so just remove one of the edges from consideration
+            # Actually, turns out this is surprisingly fine??? Who knew. Leaving for potential bugs later...
+            #if overlap and not check_1overlap(out_slice, edge_slice[key]):
+                #edge_init_done[keytb][inds[1]] = False
+            
+            if not check_1overlap(out_slice, edge_slice[key]):
+                continue
+            
+            if not todo_file[out_slice][inds]:
+                continue
+
+            todo = 0 + (not todo_file[edge_slice[key]]) +\
+                + (not todo_file[edge_slice[keylr]][inds[0]])\
+                + (not todo_file[edge_slice[keytb]][inds[1]])
+            done = 0 + (not todo_file[edge_slice[key]] and done_file[edge_slice[key]]) +\
+                + (not todo_file[edge_slice[keylr]][inds[0]] and done_file[edge_slice[keylr]][inds[0]])\
+                + (not todo_file[edge_slice[keytb]][inds[1]] and done_file[edge_slice[keytb]][inds[1]])
+            
+            if done == 2 and todo == 3: # not done yet
+                edge_init_done[keytb][inds[1]] = False
+                edge_init_done[keylr][inds[0]] = False
+                continue
+            if done == 2 and todo == 2:  #double dipping, just eliminate one of the two
+                edge_init_done[keytb][inds[1]] = False
+                continue
+            if done == 1 and todo == 1:
+                continue
+            
+            assert (done == 3)
+            edge_init_done[keytb][inds[1]] = True
+            edge_init_done[keylr][inds[0]] = True
+            edge_init_data[keylr][inds[0]] -= uca_file[edge_slice[key]]
 
         # fix my TODO if my neighbor has TODO on the same edge -- that should never happen except for floating point
         # rounding errors
@@ -172,6 +194,14 @@ def calc_uca_ec(fn, out_fn_uca, out_fn_uca_edges, out_fn_todo, out_fn_done, out_
     except Exception as e:
         return (0, fn + ':' + traceback.format_exc(), None)
     return (1, "{}: success".format(fn), uca)
+
+def check_1overlap(out_slice, edge_slc):
+    e_c = np.array(edge_slc)
+    e_c[0] = np.clip(e_c[0], out_slice[0].start, out_slice[0].stop - 1)
+    e_c[1] = np.clip(e_c[1], out_slice[1].start, out_slice[1].stop - 1)
+    if any((e_c - edge_slc) == 1):
+        return True
+    return False
 
 def calc_twi(fn, out_fn_twi, out_fn, out_slice, dtype=np.float64):
     try:
@@ -501,25 +531,25 @@ class ProcessManager(tl.HasTraits):
 
             # Do corner overlaps
             # top left
-            if id[1] > 0 or id[0] > 0:
-                corner_tl = 0
-            else:
+            if id[1] > 0 and id[0] > 0:
                 corner_tl = 1
+            else:
+                corner_tl = 0
             # bottom left
-            if id[1] > 0 or id[0] < (self.grid_id2i.shape[0] - 1):
-                corner_bl = 0
+            if id[1] > 0 and id[0] < (self.grid_id2i.shape[0] - 1):
+                corner_bl = 1
             else:
-                corner_bl = 1     
+                corner_bl = 0     
             # top right
-            if id[1] < (self.grid_id2i.shape[1] - 1) or id[0] > 0:
-                corner_tr = 0
-            else:
+            if id[1] < (self.grid_id2i.shape[1] - 1) and id[0] > 0:
                 corner_tr = 1
-            # bottom right
-            if id[1] < (self.grid_id2i.shape[1] - 1) or id[0] < (self.grid_id2i.shape[0] - 1):
-                corner_br = 0
             else:
+                corner_tr = 0
+            # bottom right
+            if id[1] < (self.grid_id2i.shape[1] - 1) and id[0] < (self.grid_id2i.shape[0] - 1):
                 corner_br = 1
+            else:
+                corner_br = 0
 
             self.grid_slice_unique.append((
                 slice(slc[0].start + lat_start, slc[0].stop - lat_end),
