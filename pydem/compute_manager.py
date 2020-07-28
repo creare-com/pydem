@@ -156,7 +156,7 @@ def calc_twi(fn, out_fn_twi, out_fn, out_slice, dtype=np.float64):
         kwargs['direction'] = zarr.open(out_fn, mode='r')['aspect'][out_slice]
         kwargs['mag'] = zarr.open(out_fn, mode='a')['slope'][out_slice]
         kwargs['fill_flats'] = False  # assuming we already did this
-        kwargs['uca'] = zarr.open(out_fn, mode='a')['uca'][out_slice]
+        kwargs['uca'] = zarr.open(out_fn, mode='a')['uca'][out_slice] + zarr.open(out_fn, mode='a')['uca_edges'][out_slice]
         dp = DEMProcessor(**kwargs)
         dp.find_flats()
         dp.calc_twi()
