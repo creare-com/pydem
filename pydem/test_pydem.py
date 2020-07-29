@@ -370,10 +370,11 @@ def mk_test_multifile(testnum, NN, testdir, nx_grid=3, ny_grid=4, nx_overlap=16,
         pass
 
     def _get_chunk_edges(NN, chunk_size, chunk_overlap):
+        chunk_size = int(chunk_size)
         left_edge = np.arange(0, NN - chunk_overlap, chunk_size)
-        left_edge[1:] -= chunk_overlap
+        left_edge[1:] -= chunk_overlap // 2
         right_edge = np.arange(0, NN - chunk_overlap, chunk_size)
-        right_edge[:-1] = right_edge[1:] + chunk_overlap
+        right_edge[:-1] = right_edge[1:] + int(np.ceil(chunk_overlap / 2))
         right_edge[-1] = NN
         right_edge = np.minimum(right_edge, NN)
         return left_edge, right_edge
@@ -383,8 +384,8 @@ def mk_test_multifile(testnum, NN, testdir, nx_grid=3, ny_grid=4, nx_overlap=16,
 
     ni, nj = raster.shape
 
-    top_edge, bottom_edge = _get_chunk_edges(ni, ni // ny_grid, ny_overlap)
-    left_edge, right_edge = _get_chunk_edges(nj, nj // nx_grid, nx_overlap)
+    top_edge, bottom_edge = _get_chunk_edges(ni, np.ceil(ni / ny_grid), ny_overlap)
+    left_edge, right_edge = _get_chunk_edges(nj, np.ceil(nj / nx_grid), nx_overlap)
 
 #    gc = elev_data.grid_coordinates
 #    lat = gc.y_axis
