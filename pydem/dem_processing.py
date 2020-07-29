@@ -136,8 +136,8 @@ class DEMProcessor(tl.HasTraits):
 
     plotflag = tl.Bool(False)  # Debug plots
 
-    dX = tt.Array(None, allow_none=True)  # delta x
-    dY = tt.Array(None, allow_none=True)  # delta y
+    dX = tt.Array(None, allow_none=True)  # delta x on 'fence' grid
+    dY = tt.Array(None, allow_none=True)  # delta y on 'fence' grid
     
     bounds = tl.List()
     transform = tl.List()
@@ -152,11 +152,11 @@ class DEMProcessor(tl.HasTraits):
 
     @tl.default('dX')
     def _default_dX(self):
-        return np.ones(self.elev.shape[0] - 1) / self.elev.shape[1]  # dX only changes in latitude
+        return np.ones(self.elev.shape[0] - 1)  # / self.elev.shape[1]  # dX only changes in latitude
 
     @tl.default('dY')
     def _default_dY(self):
-        return np.ones(self.elev.shape[0] - 1) / self.elev.shape[0]
+        return np.ones(self.elev.shape[0] - 1)  # / self.elev.shape[0]
 
     flats = tl.Instance(np.ndarray, None)  # Boolean array indicating location of flats
 
@@ -1308,6 +1308,8 @@ class DEMProcessor(tl.HasTraits):
                 border = get_border_index(pit_area, elev.shape, elev.size)
 
                 eborder = e[border]
+                if eborder.size == 0:
+                    break                    
                 emin = eborder.min()
                 if emin < epit:
                     drain = border[eborder < epit]
