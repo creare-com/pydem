@@ -855,10 +855,18 @@ class DEMProcessor(tl.HasTraits):
         self_area = np.concatenate((self_area[0:1], self_area))
         # Set the ids to the edges that are now done, and initialize the
         # edge area
-        area[:, 0] = area_edges[:, 0] - self_area * ids[:, 0]
-        area[:, -1] = area_edges[:, -1] - self_area * ids[:, -1]
-        area[-1, :] = area_edges[-1, :] - self_area[-1] * ids[-1, :]
-        area[0, :] = area_edges[0, :] - self_area[0] * ids[0, :]
+        #area[:, 0] = area_edges[:, 0] - self_area * ids[:, 0]
+        #area[:, -1] = area_edges[:, -1] - self_area * ids[:, -1]
+        #area[-1, :] = area_edges[-1, :] - self_area[-1] * ids[-1, :]
+        #area[0, :] = area_edges[0, :] - self_area[0] * ids[0, :]
+        
+        # We also have to remove any edge-to-edge contributions from self.uca/uca_init
+        # The simplest way is just to re-initialize the edges that are now marked as 'done'
+        area[ids[:, 0], 0] =  area_edges[ids[:, 0], 0] - self.uca[ids[:, 0], 0]
+        area[ids[:, -1], -1] = area_edges[ids[:, -1], -1] - self.uca[ids[:, -1], -1]
+        area[-1, ids[-1, :]] = area_edges[-1, ids[-1, :]] - self.uca[-1, ids[-1, :]]
+        area[0, ids[0, :]] =  area_edges[0, ids[0, :]] - self.uca[0, ids[0, :]]
+
 
         ids = ids.ravel()
         ids0 = ids.copy()
