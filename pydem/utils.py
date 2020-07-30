@@ -46,9 +46,10 @@ def read_raster(fn):
 
 def dem_processor_from_raster_kwargs(fn):
     dataset = read_raster(fn)
-    dx, dy = mk_dx_dy_from_geotif_layer(dataset)
+    dx, dy, dx2, dy2 = mk_dx_dy_from_geotif_layer(dataset)
     elev = dataset.read(1)
-    return dict(dX=dx, dY=dy, elev=elev, bounds=dataset.bounds, transform=dataset.transform)
+    return dict(dX=dx, dY=dy, elev=elev, bounds=dataset.bounds, transform=dataset.transform,
+                dX2=dx2, dY2=dy2)
 
 def mk_transform(lat_top, lon_left, dlat, dlon, lat_lon_centered=False):
     if lat_lon_centered:
@@ -195,7 +196,17 @@ def mk_dx_dy_from_geotif_layer(dataset):
     dY = np.zeros((dataset.shape[0] - 1))
     for i in range(len(dY)):
         dY[i] = d.measure((lat + dy * i, lon), (lat + dy * (i + 1), lon)) * 1000  # km2m
-    return dX, dY
+        
+    lon = dataset.transform.d + dx 
+    lat = dataset.transform.f + dy 
+    dX2 = np.zeros((dataset.shape[0]))
+    for j in range(len(dX2)):
+        dX2[j] = d.measure((lat + dy * (j + 1), lon + dx), (lat + dy * (j + 1), lon)) * 1000  # km2m    
+    dY2 = np.zeros((dataset.shape[0]))
+    for i in range(len(dY2)):
+        dY2[i] = d.measure((lat + dy * i, lon), (lat + dy * (i + 1), lon)) * 1000  # km2m
+        
+    return dX, dY, dX2, dY2
 
 
 def mk_geotiff_obj(raster, fn, bands=1, gdal_data_type=np.float32,

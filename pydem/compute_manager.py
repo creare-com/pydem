@@ -38,7 +38,7 @@ EDGE_SLICES = {
         'bottom-left' : (-1, 0),
         }
 
-DEBUG = True
+DEBUG = False
 
 def calc_elev_cond(fn, out_fn, out_slice, dtype=np.float64):
     try:
@@ -166,7 +166,7 @@ def calc_uca(fn, out_fn_uca, out_fn_todo, out_fn_done, out_fn, out_slice, edge_s
             dp.dY[:] = 1        
         
         dp.find_flats()
-        dp.calc_uca()
+        dp.calc_uca(plotflag=False)
         save_result(dp.uca.astype(dtype), out_fn_uca, out_slice)
         save_result(dp.edge_todo.astype(np.bool), out_fn_todo, out_slice, _test_bool)
         save_result(dp.edge_done.astype(np.bool), out_fn_done, out_slice, _test_bool)

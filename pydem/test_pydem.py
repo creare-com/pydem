@@ -51,7 +51,7 @@ def mk_xy_latlon(N):
     if os.path.exists('temp.tif'):
         os.remove('temp.tif')
     r, transform = mk_geotiff_obj(raster, 'temp.tif')
-    dx, dy = mk_dx_dy_from_geotif_layer(r)
+    dx, dy, _, _ = mk_dx_dy_from_geotif_layer(r)
     y = np.concatenate([[0], np.cumsum(dx)])
     x = np.concatenate([[0], np.cumsum(dy)])
     # Center it on zero

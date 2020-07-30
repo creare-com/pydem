@@ -138,6 +138,9 @@ class DEMProcessor(tl.HasTraits):
 
     dX = tt.Array(None, allow_none=True)  # delta x on 'fence' grid
     dY = tt.Array(None, allow_none=True)  # delta y on 'fence' grid
+    dX2 = tt.Array(None, allow_none=True)  # delta x on 'post' grid
+    dY2 = tt.Array(None, allow_none=True)  # delta y on 'post' grid
+    
     
     bounds = tl.List()
     transform = tl.List()
@@ -157,6 +160,14 @@ class DEMProcessor(tl.HasTraits):
     @tl.default('dY')
     def _default_dY(self):
         return np.ones(self.elev.shape[0] - 1)  # / self.elev.shape[0]
+    
+    @tl.default('dX2')
+    def _default_dX(self):
+        return np.ones(self.elev.shape[0])  # / self.elev.shape[1]  # dX only changes in latitude
+
+    @tl.default('dY2')
+    def _default_dY(self):
+        return np.ones(self.elev.shape[0])  # / self.elev.shape[0]    
 
     flats = tl.Instance(np.ndarray, None)  # Boolean array indicating location of flats
 
@@ -627,8 +638,6 @@ class DEMProcessor(tl.HasTraits):
         
         area = np.zeros(data.shape, 'float64')
         # We need to remove self-area because we already added that contribution to the UCA computation
-        self_area = (dX * dY)
-        self_area = np.concatenate((self_area[0:1], self_area))
         # Set the ids to the edges that are now done, and initialize the
         # edge area
         area[edge_done[:, 0], 0] =  area_edges[edge_done[:, 0], 0] - self.uca[edge_done[:, 0], 0]
@@ -708,8 +717,9 @@ class DEMProcessor(tl.HasTraits):
         colsum = np.array(A.sum(1)).ravel()
         ids = colsum == 0  # If no one drains into me
 
-        area = (dX * dY)
-        area = np.concatenate((area[0:1], area)).reshape(area.size+1, 1)
+        area = (self.dX2 * self.dY2).reshape(data.shape[0], 1)
+        #area = (self.dX * self.dY)
+        #area = np.concatenate((area[0:1], area)).reshape(area.size+1, 1)
         
         #area = ((dX[1:] + dX[:-1]) / 2 * (dY[1:] + dY[:-1]) / 2)
         #dX0 = (dX[0] - (dX[1] - dX[0]) + dX[0]) / 2
@@ -733,7 +743,7 @@ class DEMProcessor(tl.HasTraits):
         # Check the inlet edges
         edge_todo = np.zeros_like(done)
         ids_ed = np.arange(data.size).reshape(data.shape)
-        TOL = 1e-4
+        TOL = 1e-2
         # left
         edge_todo[:, 0] = (A[:, ids_ed[:, 0]].sum(0) > TOL) & np.isin(section[:, 0], [6, 7, 0, 1])
         # right
@@ -742,14 +752,17 @@ class DEMProcessor(tl.HasTraits):
         edge_todo[0, :] = (A[:, ids_ed[0, :]].sum(0) > TOL) & np.isin(section[0, :], [4, 5, 6, 7])
         # bottom
         edge_todo[-1, :] = (A[:, ids_ed[-1, :]].sum(0) > TOL) & np.isin(section[-1, :], [0, 1, 2, 3])
+        # The corners in a single-overlap situation can acts as a 'passthrough' for data. In that case nothing in the 
+        # tile drains into it, and nothing drains out of it. For the sake of everything working, we need to
+        # mark this as a todo edge. This explains the second | below. 
         # top-left
-        edge_todo[0, 0] |= (A[:, ids_ed[0, 0]].sum(0) > TOL)
+        edge_todo[0, 0] |= (A[:, ids_ed[0, 0]].sum(0) > TOL) | (A[ids_ed[0, 0], :].sum(1) < TOL)
         # top-right
-        edge_todo[0, -1] |= (A[:, ids_ed[0, -1]].sum(0) > TOL)
+        edge_todo[0, -1] |= (A[:, ids_ed[0, -1]].sum(0) > TOL) | (A[ids_ed[0, -1], :].sum(1) < TOL)
         # bottom-left
-        edge_todo[-1, 0] |= (A[:, ids_ed[-1, 0]].sum(0) > TOL)
+        edge_todo[-1, 0] |= (A[:, ids_ed[-1, 0]].sum(0) > TOL) | (A[ids_ed[-1, 0], :].sum(1) < TOL)
         # bottom -right
-        edge_todo[-1, -1] |= (A[:, ids_ed[-1, -1]].sum(0) > TOL)
+        edge_todo[-1, -1] |= (A[:, ids_ed[-1, -1]].sum(0) > TOL) | (A[ids_ed[-1, -1], :].sum(1) < TOL)
 
         # Will do the tile-level doneness
         edge_todo_i_no_mask = edge_todo.copy() & edge_todo_i_no_mask
