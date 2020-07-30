@@ -152,8 +152,8 @@ def calc_uca_ec(fn, out_fn_uca, out_fn_uca_edges, out_fn_todo, out_fn_done, out_
             overlap = edge_init_done[keytb][inds[1]] & edge_init_done[keylr][inds[0]]
             # We will be double-dipping on the corner, so just remove one of the edges from consideration
             # Actually, turns out this is surprisingly fine??? Who knew. Leaving for potential bugs later...
-            #if overlap and not check_1overlap(out_slice, edge_slice[key]):
-                #edge_init_done[keytb][inds[1]] = False
+            if overlap and not check_1overlap(out_slice, edge_slice[key]):
+                edge_init_done[keytb][inds[1]] = False
             
             if not check_1overlap(out_slice, edge_slice[key]):
                 continue
