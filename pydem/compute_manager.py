@@ -94,20 +94,20 @@ def calc_uca(fn, out_fn_uca, out_fn_todo, out_fn_done, out_fn, out_slice, edge_s
             # only replace downstream edges
             d = kwargs['direction'][EDGE_SLICES[key]]
             if key == 'right':
-                ids = (d >= downstream_edges[key][0]) | (d <= downstream_edges[key][1])
+                ids = ((d >= downstream_edges[key][0]) | (d <= downstream_edges[key][1])) & (d >= 0)
             else:
                 ids = (d >= downstream_edges[key][0]) & (d <= downstream_edges[key][1])
             if key in ['top', 'bottom']:
                 ids = ids | ((d < 1e-6) & (d >= 0)) | (np.abs(d - np.pi * 2) < 1e-6)
             # also replace any flats
-            #ids = ids | d == -1
+            ids = ids | (d == -1)
             # Don't do corners, sometimes -- these are handled explicitly by the next block
             if key in ['left', 'right']:
                 ids[0] = ids[0] & (not ((d[0] >= downstream_edges['top'][0]) & (d[0] <= downstream_edges['top'][1])))
                 ids[-1] = ids[-1] & (not ((d[-1] >= downstream_edges['bottom'][0]) & (d[-1] <= downstream_edges['bottom'][1])))
             else: 
                 ids[0] = ids[0] & (not ((d[0] >= downstream_edges['left'][0]) & (d[0] <= downstream_edges['left'][1])))
-                ids[-1] = ids[-1] & (not ((d[-1] >= downstream_edges['right'][0]) | (d[-1] <= downstream_edges['right'][1])))
+                ids[-1] = ids[-1] & (not ((d[-1] >= downstream_edges['right'][0]) | (d[-1] <= downstream_edges['right'][1])) & (d[-1] >= 0))
                 
             kwargs['direction'][EDGE_SLICES[key]][ids] = zarr.open(out_fn, mode='r')['aspect'][edge_slice[key]][ids]
             kwargs['mag'][EDGE_SLICES[key]][ids] = zarr.open(out_fn, mode='r')['slope'][edge_slice[key]][ids]
@@ -132,7 +132,7 @@ def calc_uca(fn, out_fn_uca, out_fn_todo, out_fn_done, out_fn, out_slice, edge_s
             # only replace downstream corners
             d = kwargs['direction'][EDGE_SLICES[key]]
             if keylr == 'right':
-                ids = ((d >= downstream_edges[keylr][0]) | (d <= downstream_edges[keylr][1])) \
+                ids = (((d >= downstream_edges[keylr][0]) | (d <= downstream_edges[keylr][1])) & (d >= 0)) \
                     & ((d >= downstream_edges[keytb][0]) & (d <= downstream_edges[keytb][1]) | \
                            (((d < 1e-6) & (d >= 0)) | (np.abs(d - np.pi * 2) < 1e-6))
                        )
