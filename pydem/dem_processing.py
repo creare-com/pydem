@@ -597,8 +597,8 @@ class DEMProcessor(tl.HasTraits):
             self.uca += area
             self.edge_todo = e2doi
             self.edge_done = edone
-            self.uca = self.fix_self_edge_pixels(edge_data, edge_init_done, edge_init_todo, self.uca)
-            self.uca = self.fix_edge_pixels(edge_data, edge_init_done, edge_init_todo, self.uca, False)            
+            #self.uca = self.fix_self_edge_pixels(edge_data, edge_init_done, edge_init_todo, self.uca)
+            #self.uca = self.fix_edge_pixels(edge_data, edge_init_done, edge_init_todo, self.uca, False)            
 
         print('..Done')
 
@@ -843,24 +843,27 @@ class DEMProcessor(tl.HasTraits):
         C = A.tocsr()
 
         ids = np.zeros(data.shape, bool)
-        area = np.zeros(data.shape, 'float64')
-        # Set the ids to the edges that are now done, and initialize the
-        # edge area
-        area[:, 0] = area_edges[:, 0]
-        area[:, -1] = area_edges[:, -1]
-        area[-1, :] = area_edges[-1, :]
-        area[0, :] = area_edges[0, :]
-
+        
         # Initialize starting ids
         ids = edge_done & edge_todo
         edge_todo = edge_todo & ~edge_done
-        edge_todo_tile = None
+        edge_todo_tile = None        
+        
+        area = np.zeros(data.shape, 'float64')
+        # We need to remove self-area because we already added that contribution to the UCA computation
+        self_area = (dX * dY)
+        self_area = np.concatenate((self_area[0:1], self_area))
+        # Set the ids to the edges that are now done, and initialize the
+        # edge area
+        area[:, 0] = area_edges[:, 0] - self_area * ids[:, 0]
+        area[:, -1] = area_edges[:, -1] - self_area * ids[:, -1]
+        area[-1, :] = area_edges[-1, :] - self_area[-1] * ids[-1, :]
+        area[0, :] = area_edges[0, :] - self_area[0] * ids[0, :]
 
         ids = ids.ravel()
         ids0 = ids.copy()
 
         area[flats] = np.nan
-        edge_done = ~edge_todo
 
         edge_todo_i = edge_todo.copy()
         ids_old = np.zeros_like(ids)
@@ -869,7 +872,7 @@ class DEMProcessor(tl.HasTraits):
         done.ravel()[ids] = False
         
         # Drain edges that come from exterior to itself
-        area = self.fix_self_edge_pixels(edge_init_data[0], edge_init_data[1], edge_init_data[2], uca=area)
+        #area = self.fix_self_edge_pixels(edge_init_data[0], edge_init_data[1], edge_init_data[2], uca=area)
 
         a = cyutils.drain_connections(
             done.ravel(), ids, B.indptr, B.indices, set_to=False)
@@ -879,10 +882,11 @@ class DEMProcessor(tl.HasTraits):
         
         # Set all the edges to "done". This ensures that another edges does not stop
         # the propagation of data
-        done[:, 0] = True
-        done[:, -1] = True
-        done[0, :] = True
-        done[-1, :] = True
+        #done[:, 0] = True
+        #done[:, -1] = True
+        #done[0, :] = True
+        #done[-1, :] = True
+        done.ravel()[ids0] = True
         #
         ids = ids0.copy()
         ids_old[:] = 0
@@ -893,7 +897,7 @@ class DEMProcessor(tl.HasTraits):
                                         B.indptr, B.indices, B.data,
                                         C.indptr, C.indices,
                                         area.shape[0], area.shape[1],
-                                        skip_edge=True)
+                                        skip_edge=False)
         area = a.reshape(area.shape)
         done = b.reshape(done.shape)
 
@@ -959,11 +963,15 @@ class DEMProcessor(tl.HasTraits):
         # Check the inlet edges
         edge_todo = np.zeros_like(done)
         ids_ed = np.arange(data.size).reshape(data.shape)
+        TOL = 1e-4
         # left
-        edge_todo[:, 0] = (A[:, ids_ed[:, 0]].sum(0) > 0)
-        edge_todo[:, -1] = (A[:, ids_ed[:, -1]].sum(0) > 0)
-        edge_todo[0, :] = (A[:, ids_ed[0, :]].sum(0) > 0)
-        edge_todo[-1, :] = (A[:, ids_ed[-1, :]].sum(0) > 0)
+        edge_todo[:, 0] = (A[:, ids_ed[:, 0]].sum(0) > TOL) & np.isin(section[:, 0], [6, 7, 0, 1])
+        # right
+        edge_todo[:, -1] = (A[:, ids_ed[:, -1]].sum(0) > TOL) & np.isin(section[:, -1], [2, 3, 4, 5])
+        # top
+        edge_todo[0, :] = (A[:, ids_ed[0, :]].sum(0) > TOL) & np.isin(section[0, :], [4, 5, 6, 7])
+        # bottom
+        edge_todo[-1, :] = (A[:, ids_ed[-1, :]].sum(0) > TOL) & np.isin(section[-1, :], [0, 1, 2, 3])
 
         # Will do the tile-level doneness
         edge_todo_i_no_mask = edge_todo.copy() & edge_todo_i_no_mask
@@ -1165,8 +1173,8 @@ class DEMProcessor(tl.HasTraits):
         A = sps.csc_matrix((mat_data.ravel(),
                             np.row_stack((j.ravel(), i.ravel()))),
                            shape=(NN, NN))
-        normalize = np.array(A.sum(0) + 1e-16).squeeze()
-        A = np.dot(A, sps.diags(1/normalize, 0))
+        #normalize = np.array(A.sum(0) + 1e-16).squeeze()
+        #A = np.dot(A, sps.diags(1/normalize, 0))
 
         return A
 
@@ -1200,45 +1208,45 @@ class DEMProcessor(tl.HasTraits):
         # Now do the edges
         # left edge
         slc0 = (slice(1, -1), slice(0, 1))
-        for ind in [0, 1, 2, 6, 7]:
+        for ind in [0, 1, 2, 5, 6, 7]:
             e1 = facets[ind][1]
             e2 = facets[ind][2]
             I = section[slc0] == ind
             j1[slc0][I] = i12[1 + e1[0]:shp[0] + e1[0], e1[1]][I.ravel()]
-            if ind != 2:
+            if ind not in [2, 5]:
                 j2[slc0][I] = i12[1 + e2[0]:shp[0] + e2[0], e2[1]][I.ravel()]
 
         # right edge
         slc0 = (slice(1, -1), slice(-1, None))
-        for ind in [2, 3, 4, 5, 6]:
+        for ind in [1, 2, 3, 4, 5, 6]:
             e1 = facets[ind][1]
             e2 = facets[ind][2]
             I = section[slc0] == ind
             j1[slc0][I] = i12[1 + e1[0]:shp[0] + e1[0],
                               shp[1] + e1[1]][I.ravel()]
-            if ind != 6:
+            if ind not in [1, 6]:
                 j2[slc0][I] = i12[1 + e2[0]:shp[0] + e2[0],
                               shp[1] + e2[1]][I.ravel()]
 
         # top edge
         slc0 = (slice(0, 1), slice(1, -1))
-        for ind in [0, 4, 5, 6, 7]:
+        for ind in [0, 3, 4, 5, 6, 7]:
             e1 = facets[ind][1]
             e2 = facets[ind][2]
             I = section[slc0] == ind
             j1[slc0][I] = i12[e1[0], 1 + e1[1]:shp[1] + e1[1]][I.ravel()]
-            if ind != 0:
+            if ind not in [0, 3]:
                 j2[slc0][I] = i12[e2[0], 1 + e2[1]:shp[1] + e2[1]][I.ravel()]
 
         # bottom edge
         slc0 = (slice(-1, None), slice(1, -1))
-        for ind in [0, 1, 2, 3, 4]:
+        for ind in [0, 1, 2, 3, 4, 7]:
             e1 = facets[ind][1]
             e2 = facets[ind][2]
             I = section[slc0] == ind
             j1[slc0][I] = i12[shp[0] + e1[0],
                               1 + e1[1]:shp[1] + e1[1]][I.ravel()]
-            if ind != 4:
+            if ind not in [4, 7]:
                 j2[slc0][I] = i12[shp[0] + e2[0],
                               1 + e2[1]:shp[1] + e2[1]][I.ravel()]
 
