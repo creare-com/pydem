@@ -576,13 +576,12 @@ class DEMProcessor(tl.HasTraits):
             res = self._calc_uca_chunk(self.elev, self.dX, self.dY,
                                        self.direction, self.mag,
                                        self.flats,
-                                       area_edges=uca_edge_init,
                                        plotflag=plotflag)
             self.edge_todo = res[1]
             self.edge_done = res[2]
             self.uca = res[0]
             # Fix the very last pixel on the edges
-            self.uca = self.fix_edge_pixels(edge_data, edge_init_done, edge_init_todo, self.uca)            
+            #self.uca = self.fix_edge_pixels(edge_data, edge_init_done, edge_init_todo, self.uca)            
         else:
             print("Starting edge resolution round: ", end='')
             # last return value will be None: edge_
@@ -917,7 +916,7 @@ class DEMProcessor(tl.HasTraits):
         return area, edge_todo_i, edge_done, edge_todo_tile
 
     def _calc_uca_chunk(self, data, dX, dY, direction, mag, flats,
-                        area_edges, plotflag=False, edge_todo_i_no_mask=True):
+                        plotflag=False, edge_todo_i_no_mask=True):
         """
         Calculates the upstream contributing area for the interior, and
         includes edge contributions if they are provided through area_edges.
@@ -951,13 +950,6 @@ class DEMProcessor(tl.HasTraits):
         self.twi_min_area = min(self.twi_min_area, min_area)
         
         area = area.repeat(data.shape[1], 1)
-        # Set the edge areas to zero, will add those contributions later
-        area[:, 0] = area_edges[:, 0]
-        area[:, -1] = area_edges[:, -1]
-        area[-1, :] = area_edges[-1, :]
-        area[0, :] = area_edges[0, :]
-        # These edges are done, they have been drained already
-        ids[area_edges.ravel() > 0] = True
 
         done = np.zeros(data.shape, bool)
         done.ravel()[ids] = True
@@ -968,14 +960,10 @@ class DEMProcessor(tl.HasTraits):
         edge_todo = np.zeros_like(done)
         ids_ed = np.arange(data.size).reshape(data.shape)
         # left
-        edge_todo[:, 0] = (A[:, ids_ed[:, 0]].sum(0) > 0) \
-            & (area_edges[:, 0] == 0)
-        edge_todo[:, -1] = (A[:, ids_ed[:, -1]].sum(0) > 0) \
-            & (area_edges[:, -1] == 0)
-        edge_todo[0, :] = (A[:, ids_ed[0, :]].sum(0) > 0) \
-            & (area_edges[0, :] == 0)
-        edge_todo[-1, :] = (A[:, ids_ed[-1, :]].sum(0) > 0) \
-            & (area_edges[-1, :] == 0)
+        edge_todo[:, 0] = (A[:, ids_ed[:, 0]].sum(0) > 0)
+        edge_todo[:, -1] = (A[:, ids_ed[:, -1]].sum(0) > 0)
+        edge_todo[0, :] = (A[:, ids_ed[0, :]].sum(0) > 0)
+        edge_todo[-1, :] = (A[:, ids_ed[-1, :]].sum(0) > 0)
 
         # Will do the tile-level doneness
         edge_todo_i_no_mask = edge_todo.copy() & edge_todo_i_no_mask
@@ -1189,6 +1177,13 @@ class DEMProcessor(tl.HasTraits):
         non-flat regions in the image. In this case, each pixel can only
         drain to either 1 or two neighbors.
         """
+        #              ^ ^  ^^
+        #             \ \|  |/ 
+        #            <-3 2 1 /
+        #            <-4   0 ->   
+        #             /5 6 7 -> 
+        #             /| |\ \
+        #        
         shp = np.array(section.shape) - 1
 
         facets = self.facets
@@ -1205,79 +1200,87 @@ class DEMProcessor(tl.HasTraits):
         # Now do the edges
         # left edge
         slc0 = (slice(1, -1), slice(0, 1))
-        for ind in [0, 1, 6, 7]:
+        for ind in [0, 1, 2, 6, 7]:
             e1 = facets[ind][1]
             e2 = facets[ind][2]
             I = section[slc0] == ind
             j1[slc0][I] = i12[1 + e1[0]:shp[0] + e1[0], e1[1]][I.ravel()]
-            j2[slc0][I] = i12[1 + e2[0]:shp[0] + e2[0], e2[1]][I.ravel()]
+            if ind != 2:
+                j2[slc0][I] = i12[1 + e2[0]:shp[0] + e2[0], e2[1]][I.ravel()]
 
         # right edge
         slc0 = (slice(1, -1), slice(-1, None))
-        for ind in [2, 3, 4, 5]:
+        for ind in [2, 3, 4, 5, 6]:
             e1 = facets[ind][1]
             e2 = facets[ind][2]
             I = section[slc0] == ind
             j1[slc0][I] = i12[1 + e1[0]:shp[0] + e1[0],
                               shp[1] + e1[1]][I.ravel()]
-            j2[slc0][I] = i12[1 + e2[0]:shp[0] + e2[0],
+            if ind != 6:
+                j2[slc0][I] = i12[1 + e2[0]:shp[0] + e2[0],
                               shp[1] + e2[1]][I.ravel()]
 
         # top edge
         slc0 = (slice(0, 1), slice(1, -1))
-        for ind in [4, 5, 6, 7]:
+        for ind in [0, 4, 5, 6, 7]:
             e1 = facets[ind][1]
             e2 = facets[ind][2]
             I = section[slc0] == ind
             j1[slc0][I] = i12[e1[0], 1 + e1[1]:shp[1] + e1[1]][I.ravel()]
-            j2[slc0][I] = i12[e2[0], 1 + e2[1]:shp[1] + e2[1]][I.ravel()]
+            if ind != 0:
+                j2[slc0][I] = i12[e2[0], 1 + e2[1]:shp[1] + e2[1]][I.ravel()]
 
         # bottom edge
         slc0 = (slice(-1, None), slice(1, -1))
-        for ind in [0, 1, 2, 3]:
+        for ind in [0, 1, 2, 3, 4]:
             e1 = facets[ind][1]
             e2 = facets[ind][2]
             I = section[slc0] == ind
             j1[slc0][I] = i12[shp[0] + e1[0],
                               1 + e1[1]:shp[1] + e1[1]][I.ravel()]
-            j2[slc0][I] = i12[shp[0] + e2[0],
+            if ind != 4:
+                j2[slc0][I] = i12[shp[0] + e2[0],
                               1 + e2[1]:shp[1] + e2[1]][I.ravel()]
 
         # top-left corner
         slc0 = (slice(0, 1), slice(0, 1))
-        for ind in [6, 7]:
+        for ind in [0, 5, 6, 7]:
             e1 = facets[ind][1]
             e2 = facets[ind][2]
             if section[slc0] == ind:
                 j1[slc0] = i12[e1[0], e1[1]]
-                j2[slc0] = i12[e2[0], e2[1]]
+                if ind not in [0, 5]:
+                    j2[slc0] = i12[e2[0], e2[1]]
 
         # top-right corner
         slc0 = (slice(0, 1), slice(-1, None))
-        for ind in [4, 5]:
+        for ind in [3, 4, 5, 6]:
             e1 = facets[ind][1]
             e2 = facets[ind][2]
             if section[slc0] == ind:
                 j1[slc0] = i12[e1[0], shp[1] + e1[1]]
-                j2[slc0] = i12[e2[0], shp[1] + e2[1]]
+                if ind not in [3, 6]:
+                    j2[slc0] = i12[e2[0], shp[1] + e2[1]]
 
         # bottom-left corner
         slc0 = (slice(-1, None), slice(0, 1))
-        for ind in [0, 1]:
+        for ind in [0, 1, 2, 7]:
             e1 = facets[ind][1]
             e2 = facets[ind][2]
             if section[slc0] == ind:
                 j1[slc0] = i12[shp[0] + e1[0], e1[1]]
-                j2[slc0] = i12[shp[0] + e2[0], e2[1]]
+                if ind not in [2, 7]:
+                    j2[slc0] = i12[shp[0] + e2[0], e2[1]]
 
         # bottom-right corner
         slc0 = (slice(-1, None), slice(-1, None))
-        for ind in [2, 3]:
+        for ind in [1, 2, 3, 4]:
             e1 = facets[ind][1]
             e2 = facets[ind][2]
             if section[slc0] == ind:
                 j1[slc0] = i12[e1[0] + shp[0], shp[1] + e1[1]]
-                j2[slc0] = i12[e2[0] + shp[0], shp[1] + e2[1]]
+                if ind not in [1, 4]:
+                    j2[slc0] = i12[e2[0] + shp[0], shp[1] + e2[1]]
 
         return j1, j2
 

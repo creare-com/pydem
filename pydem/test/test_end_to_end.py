@@ -117,18 +117,18 @@ class TestEndtoEnd(object):
         [ 1.57079633,  1.57079633,  1.57079633,  1.57079633,  1.57079633],
         [ 1.57079633,  1.57079633,  1.57079633,  1.57079633,  1.57079633]])
     mag = np.array([
-        [-1., -1.,  5., -1., -1.],
-        [ 5.,  5.,  5.,  5.,  5.],
-        [ 5.,  5.,  5.,  5.,  5.],
-        [ 5.,  5.,  5.,  5.,  5.],
-        [ 5.,  5.,  5.,  5.,  5.]])
+        [-1., -1.,  1., -1., -1.],
+        [ 1.,  1.,  1.,  1.,  1.],
+        [ 1.,  1.,  1.,  1.,  1.],
+        [ 1.,  1.,  1.,  1.,  1.],
+        [ 1.,  1.,  1.,  1.,  1.]])
 
     uca = np.array([
-        [0.16, 0.16, 0.16, 0.16 , 0.16],
-        [0.12, 0.12, 0.12, 0.12, 0.12],
-        [0.08, 0.08, 0.08, 0.08, 0.08],
-        [0.04, 0.04, 0.04, 0.04, 0.04],
-        [0.04, 0.04, 0.04, 0.04, 0.04]])
+        [np.nan, np.nan, 5, np.nan , np.nan],
+        [4, 4, 4, 4, 4],
+        [3, 3, 3, 3, 3],
+        [2, 2, 2, 2, 2],
+        [1, 1, 1, 1, 1]])
 
     def test_simple_slope(self):
         dp = DEMProcessor(elev=self.elev, fill_flats=False)
@@ -137,8 +137,8 @@ class TestEndtoEnd(object):
         np.testing.assert_array_almost_equal(ang, self.ang)
 
         uca = dp.calc_uca()
-        uca = dp.fix_self_edge_pixels(None, None, None, uca)
-        uca = dp.fix_edge_pixels(None, None, None, uca, initialize=False)
+        #uca = dp.fix_self_edge_pixels(None, None, None, uca)
+        #uca = dp.fix_edge_pixels(None, None, None, uca, initialize=False)
         np.testing.assert_array_almost_equal(uca, self.uca)
 
 if __name__ == '__main__':
