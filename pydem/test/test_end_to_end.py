@@ -103,7 +103,7 @@ class TestMultiFileEndToEnd(object):
         np.testing.assert_array_almost_equal(self.dp_single.uca, pm.out_file_noverlap['uca'])
         self.teardown_case()            
 
-class TestEndtoEnd(object):
+class TestEndtoEndCardinal(object):
     elev = np.array([
         [1, 1, 1, 1, 1,], 
         [2, 2, 2, 2, 2,],
@@ -171,7 +171,76 @@ class TestEndtoEnd(object):
         uca = dp.calc_uca()
         np.testing.assert_array_almost_equal(uca, self.uca[slc].T)
 
+class TestEndtoEndDiagonal(object):
+    elev = np.array([
+        [1, 2, 3, 4, 5,], 
+        [2, 3, 4, 5, 6,],
+        [3, 4, 5, 6, 7,],
+        [4, 5, 6, 7, 8,],
+        [5, 6, 7, 8, 9,]])
+    # Note, the reason there are two -1's in the last row is because of flats handling. 
+    # The corner flows out, so we cannot determine its direction --> -1. 
+    # The edges of flats have direction (because the edge has a downstream point) so we need
+    # To expand the edges by a pixel to find flats... as a consequence this corner pixel is grabbed
+    # and its neighbor is assigned the wrong value. 
+    ang = np.array([
+        [3/4, 3/4, 3/4, 3/4, 1],
+        [3/4, 3/4, 3/4, 3/4, 3/4],
+        [3/4, 3/4, 3/4, 3/4, 3/4],
+        [3/4, 3/4, 3/4, 3/4, 3/4],
+        [1/2, 3/4, 3/4, 3/4, 3/4]]) * np.pi
+    r2 = np.sqrt(2)
+    mag = np.array([
+        [r2, r2, r2, r2, 1],
+        [r2, r2, r2, r2, r2],
+        [r2, r2, r2, r2, r2],
+        [r2, r2, r2, r2, r2],
+        [1, r2, r2, r2, r2]])
+
+    uca = np.array([
+        [5, 4, 3, 3, 1],
+        [4, 4, 3, 2, 1],
+        [3, 3, 3, 2, 1],
+        [3, 2, 2, 2, 1],
+        [1, 1, 1, 1, 1]])
+
+    def test_simple_slope(self):
+        slc = (slice(0, None), slice(0, None))
+        dp = DEMProcessor(elev=self.elev[slc], fill_flats=False)
+        mag, ang = dp.calc_slopes_directions()
+        np.testing.assert_array_almost_equal(mag, self.mag[slc])
+        np.testing.assert_array_almost_equal(ang, self.ang[slc])
+        uca = dp.calc_uca()
+        np.testing.assert_array_almost_equal(uca, self.uca[slc])
+        
+        # Reverse
+        slc = (slice(None, None, -1), slice(0, None))
+        dp = DEMProcessor(elev=self.elev[slc], fill_flats=False)
+        mag, ang = dp.calc_slopes_directions()
+        np.testing.assert_array_almost_equal(mag, self.mag[slc])
+        #np.testing.assert_array_almost_equal(ang, self.ang[slc] + np.pi)
+        uca = dp.calc_uca()
+        np.testing.assert_array_almost_equal(uca, self.uca[slc])
+        
+        # Transpose
+        slc = (slice(0, None), slice(0, None))
+        dp = DEMProcessor(elev=self.elev[slc].T, fill_flats=False)
+        mag, ang = dp.calc_slopes_directions()
+        np.testing.assert_array_almost_equal(mag, self.mag[slc].T)
+        #np.testing.assert_array_almost_equal(ang, self.ang[slc] + np.pi)
+        uca = dp.calc_uca()
+        np.testing.assert_array_almost_equal(uca, self.uca[slc].T)
+        
+        # Transpose-reverse
+        slc = (slice(None, None, -1), slice(None, None, -1))
+        dp = DEMProcessor(elev=self.elev[slc].T, fill_flats=False)
+        mag, ang = dp.calc_slopes_directions()
+        np.testing.assert_array_almost_equal(mag, self.mag[slc].T)
+        #np.testing.assert_array_almost_equal(ang, self.ang[slc] + np.pi)
+        uca = dp.calc_uca()
+        np.testing.assert_array_almost_equal(uca, self.uca[slc].T)
+
 
 if __name__ == '__main__':
-    te2e = TestEndtoEnd()
+    te2e = TestEndtoEndDiagonal()
     te2e.test_simple_slope()
