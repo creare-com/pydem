@@ -162,11 +162,11 @@ class DEMProcessor(tl.HasTraits):
         return np.ones(self.elev.shape[0] - 1)  # / self.elev.shape[0]
     
     @tl.default('dX2')
-    def _default_dX(self):
+    def _default_dX2(self):
         return np.ones(self.elev.shape[0])  # / self.elev.shape[1]  # dX only changes in latitude
 
     @tl.default('dY2')
-    def _default_dY(self):
+    def _default_dY2(self):
         return np.ones(self.elev.shape[0])  # / self.elev.shape[0]    
 
     flats = tl.Instance(np.ndarray, None)  # Boolean array indicating location of flats
