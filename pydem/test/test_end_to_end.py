@@ -74,7 +74,7 @@ class TestMultiFileEndToEnd(object):
         pm.process_twi()
         pm.save_non_overlap_data()
         
-        np.testing.assert_array_almost_equal(self.dp_single.uca, pm.out_file_noverlap['uca'])
+        np.testing.assert_array_almost_equal(self.dp_single.uca[1:-1, 1:-1], pm.out_file_noverlap['uca'][1:-1, 1:-1])
         self.teardown_case()
         
     def test_5x4_2overlap(self):
@@ -87,7 +87,7 @@ class TestMultiFileEndToEnd(object):
         pm.process_twi()
         pm.save_non_overlap_data()
         
-        np.testing.assert_array_almost_equal(self.dp_single.uca, pm.out_file_noverlap['uca'])
+        np.testing.assert_array_almost_equal(self.dp_single.uca[1:-1, 1:-1], pm.out_file_noverlap['uca'][1:-1, 1:-1])
         self.teardown_case()        
         
     def test_5x4_3overlap(self):
@@ -100,7 +100,7 @@ class TestMultiFileEndToEnd(object):
         pm.process_twi()
         pm.save_non_overlap_data()
         
-        np.testing.assert_array_almost_equal(self.dp_single.uca, pm.out_file_noverlap['uca'])
+        np.testing.assert_array_almost_equal(self.dp_single.uca[1:-1, 1:-1], pm.out_file_noverlap['uca'][1:-1, 1:-1])
         self.teardown_case()            
 
 class TestEndtoEndCardinal(object):
@@ -244,3 +244,8 @@ class TestEndtoEndDiagonal(object):
 if __name__ == '__main__':
     te2e = TestEndtoEndDiagonal()
     te2e.test_simple_slope()
+    
+    tmf = TestMultiFileEndToEnd()
+    tmf.setup_class()
+    tmf.test_3x3_2overlap()
+    print('done')
