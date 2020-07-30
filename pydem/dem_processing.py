@@ -631,10 +631,10 @@ class DEMProcessor(tl.HasTraits):
         self_area = np.concatenate((self_area[0:1], self_area))
         # Set the ids to the edges that are now done, and initialize the
         # edge area
-        area[ids[:, 0], 0] =  area_edges[ids[:, 0], 0] - self.uca[ids[:, 0], 0]
-        area[ids[:, -1], -1] = area_edges[ids[:, -1], -1] - self.uca[ids[:, -1], -1]
-        area[-1, ids[-1, :]] = area_edges[-1, ids[-1, :]] - self.uca[-1, ids[-1, :]]
-        area[0, ids[0, :]] =  area_edges[0, ids[0, :]] - self.uca[0, ids[0, :]]
+        area[edge_done[:, 0], 0] =  area_edges[edge_done[:, 0], 0] - self.uca[edge_done[:, 0], 0]
+        area[edge_done[:, -1], -1] = area_edges[edge_done[:, -1], -1] - self.uca[edge_done[:, -1], -1]
+        area[-1, edge_done[-1, :]] = area_edges[-1, edge_done[-1, :]] - self.uca[-1, edge_done[-1, :]]
+        area[0, edge_done[0, :]] =  area_edges[0, edge_done[0, :]] - self.uca[0, edge_done[0, :]]
 
 
         ids = ids.ravel()
@@ -742,6 +742,14 @@ class DEMProcessor(tl.HasTraits):
         edge_todo[0, :] = (A[:, ids_ed[0, :]].sum(0) > TOL) & np.isin(section[0, :], [4, 5, 6, 7])
         # bottom
         edge_todo[-1, :] = (A[:, ids_ed[-1, :]].sum(0) > TOL) & np.isin(section[-1, :], [0, 1, 2, 3])
+        # top-left
+        edge_todo[0, 0] |= (A[:, ids_ed[0, 0]].sum(0) > TOL)
+        # top-right
+        edge_todo[0, -1] |= (A[:, ids_ed[0, -1]].sum(0) > TOL)
+        # bottom-left
+        edge_todo[-1, 0] |= (A[:, ids_ed[-1, 0]].sum(0) > TOL)
+        # bottom -right
+        edge_todo[-1, -1] |= (A[:, ids_ed[-1, -1]].sum(0) > TOL)
 
         # Will do the tile-level doneness
         edge_todo_i_no_mask = edge_todo.copy() & edge_todo_i_no_mask

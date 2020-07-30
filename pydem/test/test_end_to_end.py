@@ -101,7 +101,21 @@ class TestMultiFileEndToEnd(object):
         pm.save_non_overlap_data()
         
         np.testing.assert_array_almost_equal(self.dp_single.uca[1:-1, 1:-1], pm.out_file_noverlap['uca'][1:-1, 1:-1])
+        self.teardown_case()
+    
+    def test_3x3_1overlap(self):
+        self.setup_case(3, 3, 1)
+        pm = compute_manager.ProcessManager(
+            in_path=os.path.join(self.DIR_NAME_MF, 'chunks'),
+            n_workers=self.N_WORKERS,
+            _debug=False,
+        )
+        pm.process_twi()
+        pm.save_non_overlap_data()
+        
+        np.testing.assert_array_almost_equal(self.dp_single.uca[1:-1, 1:-1], pm.out_file_noverlap['uca'][1:-1, 1:-1])
         self.teardown_case()            
+    
 
 class TestEndtoEndCardinal(object):
     elev = np.array([

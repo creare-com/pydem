@@ -72,13 +72,94 @@ def calc_aspect_slope(fn, out_fn_aspect, out_fn_slope, out_fn, out_slice, dtype=
         return (0, fn + ':' + traceback.format_exc())
     return (1, "{}: success".format(fn))
 
-def calc_uca(fn, out_fn_uca, out_fn_todo, out_fn_done, out_fn, out_slice, dtype=np.float64):
+def calc_uca(fn, out_fn_uca, out_fn_todo, out_fn_done, out_fn, out_slice, edge_slice, dtype=np.float64):
     try:
         kwargs = dem_processor_from_raster_kwargs(fn)
         kwargs['elev'] = zarr.open(out_fn, mode='a')['elev'][out_slice]
         kwargs['direction'] = zarr.open(out_fn, mode='r')['aspect'][out_slice]
         kwargs['mag'] = zarr.open(out_fn, mode='a')['slope'][out_slice]
         kwargs['fill_flats'] = False  # assuming we already did this
+        
+        downstream_edges = {
+            'left': [np.pi / 2, 3 * np.pi / 2],
+            'right': [2 * np.pi - np.pi / 2, np.pi / 2],
+            'top': [0, np.pi],
+            'bottom': [np.pi, 2*np.pi]
+            }
+            
+        # Fix the aspect and mag for overlap1 case
+        for key in ['left', 'right', 'top', 'bottom']:
+            if not check_1overlap(out_slice, edge_slice[key]):
+                continue
+            # only replace downstream edges
+            d = kwargs['direction'][EDGE_SLICES[key]]
+            if key == 'right':
+                ids = (d >= downstream_edges[key][0]) | (d <= downstream_edges[key][1])
+            else:
+                ids = (d >= downstream_edges[key][0]) & (d <= downstream_edges[key][1])
+            if key in ['top', 'bottom']:
+                ids = ids | ((d < 1e-6) & (d >= 0)) | (np.abs(d - np.pi * 2) < 1e-6)
+            # also replace any flats
+            #ids = ids | d == -1
+            # Don't do corners, sometimes -- these are handled explicitly by the next block
+            if key in ['left', 'right']:
+                ids[0] = ids[0] & (not ((d[0] >= downstream_edges['top'][0]) & (d[0] <= downstream_edges['top'][1])))
+                ids[-1] = ids[-1] & (not ((d[-1] >= downstream_edges['bottom'][0]) & (d[-1] <= downstream_edges['bottom'][1])))
+            else: 
+                ids[0] = ids[0] & (not ((d[0] >= downstream_edges['left'][0]) & (d[0] <= downstream_edges['left'][1])))
+                ids[-1] = ids[-1] & (not ((d[-1] >= downstream_edges['right'][0]) | (d[-1] <= downstream_edges['right'][1])))
+                
+            kwargs['direction'][EDGE_SLICES[key]][ids] = zarr.open(out_fn, mode='r')['aspect'][edge_slice[key]][ids]
+            kwargs['mag'][EDGE_SLICES[key]][ids] = zarr.open(out_fn, mode='r')['slope'][edge_slice[key]][ids]
+             
+            # Also update the direction in the output file
+            if key == 'left':
+                slc = (out_slice[0], out_slice[1].start)
+            elif key == 'right':
+                slc = (out_slice[0], out_slice[1].stop - 1)
+            elif key == 'top':
+                slc = (out_slice[0].start, out_slice[1])
+            elif key == 'bottom':
+                slc = (out_slice[0].stop - 1, out_slice[1])
+                
+            zarr.open(out_fn, mode='a')['aspect'][slc] = kwargs['direction'][EDGE_SLICES[key]]
+            zarr.open(out_fn, mode='a')['slope'][slc] = kwargs['mag'][EDGE_SLICES[key]]
+            
+        for key in ['top-left', 'top-right', 'bottom-left', 'bottom-right']:
+            if not check_1overlap(out_slice, edge_slice[key]):
+                continue
+            keytb, keylr = key.split('-')
+            # only replace downstream corners
+            d = kwargs['direction'][EDGE_SLICES[key]]
+            if keylr == 'right':
+                ids = ((d >= downstream_edges[keylr][0]) | (d <= downstream_edges[keylr][1])) \
+                    & ((d >= downstream_edges[keytb][0]) & (d <= downstream_edges[keytb][1]) | \
+                           (((d < 1e-6) & (d >= 0)) | (np.abs(d - np.pi * 2) < 1e-6))
+                       )
+            else:
+                ids = (d >= downstream_edges[keylr][0]) & (d <= downstream_edges[keylr][1]) \
+                    & ((d >= downstream_edges[keytb][0]) & (d <= downstream_edges[keytb][1]) | \
+                           (((d < 1e-6) & (d >= 0)) | (np.abs(d - np.pi * 2) < 1e-6))
+                       )
+            #ids = ids | d == -1
+            if not ids:
+                continue
+            slc = edge_slice[key]
+            kwargs['direction'][EDGE_SLICES[key]] = zarr.open(out_fn, mode='r')['aspect'][slc]
+            kwargs['mag'][EDGE_SLICES[key]] = zarr.open(out_fn, mode='r')['slope'][slc]
+            
+            # Also update the direction in the output file
+            if key == 'top-left':
+                slc = (out_slice[0].start, out_slice[1].start)
+            elif key == 'top-right':
+                slc = (out_slice[0].start, out_slice[1].stop - 1)
+            elif key == 'bottom-left':
+                slc = (out_slice[0].stop - 1, out_slice[1].start)
+            elif key == 'bottom-right':
+                slc = (out_slice[0].stop - 1, out_slice[1].stop - 1)
+            zarr.open(out_fn, mode='a')['aspect'][slc] = kwargs['direction'][EDGE_SLICES[key]]
+            zarr.open(out_fn, mode='a')['slope'][slc] = kwargs['mag'][EDGE_SLICES[key]]        
+
         dp = DEMProcessor(**kwargs)
         if DEBUG:
             dp.dX[:] = 1
@@ -151,43 +232,20 @@ def calc_uca_ec(fn, out_fn_uca, out_fn_uca_edges, out_fn_todo, out_fn_done, out_
             inds = EDGE_SLICES[key]
             overlap = edge_init_done[keytb][inds[1]] & edge_init_done[keylr][inds[0]]
             # We will be double-dipping on the corner, so just remove one of the edges from consideration
-            # Actually, turns out this is surprisingly fine??? Who knew. Leaving for potential bugs later...
-            if overlap and not check_1overlap(out_slice, edge_slice[key]):
+            if overlap:
                 edge_init_done[keytb][inds[1]] = False
-            
-            if not check_1overlap(out_slice, edge_slice[key]):
-                continue
-            
-            if not todo_file[out_slice][inds]:
-                continue
-
-            todo = 0 + (not todo_file[edge_slice[key]]) +\
-                + (not todo_file[edge_slice[keylr]][inds[0]])\
-                + (not todo_file[edge_slice[keytb]][inds[1]])
-            done = 0 + (not todo_file[edge_slice[key]] and done_file[edge_slice[key]]) +\
-                + (not todo_file[edge_slice[keylr]][inds[0]] and done_file[edge_slice[keylr]][inds[0]])\
-                + (not todo_file[edge_slice[keytb]][inds[1]] and done_file[edge_slice[keytb]][inds[1]])
-            
-            if done == 2 and todo == 3: # not done yet
-                edge_init_done[keytb][inds[1]] = False
-                edge_init_done[keylr][inds[0]] = False
-                continue
-            if done == 2 and todo == 2:  #double dipping, just eliminate one of the two
-                edge_init_done[keytb][inds[1]] = False
-                continue
-            if done == 1 and todo == 1:
-                continue
-            
-            assert (done == 3)
-            edge_init_done[keytb][inds[1]] = True
-            edge_init_done[keylr][inds[0]] = True
-            edge_init_data[keylr][inds[0]] -= uca_file[edge_slice[key]]
+                # When I have two choices of edges, the safest choice is actually the real corner, so select that... 
+                if check_1overlap(out_slice, edge_slice[key]) and done_file[edge_slice[key]]:
+                    edge_init_data[keylr][inds[0]] = uca_file[edge_slice[key]] + uca_edges_file[edge_slice[key]]
+                    edge_init_data[keytb][inds[1]] = edge_init_data[keylr][inds[0]] 
 
         # fix my TODO if my neighbor has TODO on the same edge -- that should never happen except for floating point
         # rounding errors
         edge_init_todo = {k: v & (edge_init_todo_neighbor[k] == False) for k, v in edge_init_todo.items()}
         #dp.calc_uca(plotflag=True)
-        uca = dp.calc_uca(uca_init=uca_init + uca_edges_init, edge_init_data=[edge_init_data, edge_init_done, edge_init_todo])
+        uca = dp.calc_uca(uca_init=uca_init + uca_edges_init,
+                          edge_init_data=[edge_init_data, edge_init_done, edge_init_todo],
+                          plotflag=False)
         save_result((dp.uca - uca_init).astype(dtype), out_fn_uca_edges, out_slice)
         save_result(dp.edge_todo.astype(np.bool), out_fn_todo, out_slice, _test_bool)
         save_result(dp.edge_done.astype(np.bool), out_fn_done, out_slice, _test_bool)
@@ -196,12 +254,14 @@ def calc_uca_ec(fn, out_fn_uca, out_fn_uca_edges, out_fn_todo, out_fn_done, out_
     return (1, "{}: success".format(fn), uca)
 
 def check_1overlap(out_slice, edge_slc):
+    edge_slc = [getattr(e, 'start', e) for e in edge_slc]
     e_c = np.array(edge_slc)
     e_c[0] = np.clip(e_c[0], out_slice[0].start, out_slice[0].stop - 1)
     e_c[1] = np.clip(e_c[1], out_slice[1].start, out_slice[1].stop - 1)
-    if any((e_c - edge_slc) == 1):
+    if any(np.abs(e_c - edge_slc) == 1):
         return True
     return False
+
 
 def calc_twi(fn, out_fn_twi, out_fn, out_slice, dtype=np.float64):
     try:
@@ -703,7 +763,8 @@ class ProcessManager(tl.HasTraits):
                      dtype=self.dtype)
                 for i in range(self.n_inputs)]
 
-        success = self.queue_processes(calc_aspect_slope, kwds, success=self.out_file['success'][:, 1])
+        success = self.queue_processes(calc_aspect_slope, kwds, success=self.out_file['success'][:, 1],
+                intermediate_fun=self.compute_grid_overlaps)
         self.out_file['success'][:, 1] = success
         return success
 
@@ -727,11 +788,11 @@ class ProcessManager(tl.HasTraits):
                      out_fn_done=out_edge_done,
                      out_fn=self.out_path,
                      out_slice=self.grid_slice[i],
+                     edge_slice=self.edge_data[i],
                      dtype=self.dtype)
                 for i in range(self.n_inputs)]
 
-        success = self.queue_processes(calc_uca, kwds, success=self.out_file['success'][:, 2],
-                intermediate_fun=self.compute_grid_overlaps)
+        success = self.queue_processes(calc_uca, kwds, success=self.out_file['success'][:, 2])
         self.out_file['success'][:, 2] = success
         return success
 
@@ -816,7 +877,7 @@ class ProcessManager(tl.HasTraits):
                     from matplotlib.pyplot import figure, subplot, pcolormesh, title, pause, axis, colorbar, clim, show, imshow
                     figure(figsize=(8, 4), dpi=200)
                     subplot(221)
-                    imshow(self.out_file['uca'][:])
+                    imshow(self.out_file['uca'][:] + self.out_file['uca_edges'])
                     title('uca({}) [{}] --> [{}]'.format(count, I_old[0], I[0]))
                     axis('scaled')
                     subplot(222)
@@ -826,10 +887,10 @@ class ProcessManager(tl.HasTraits):
                     clim(0, 3)
                     colorbar()
                     subplot(223)
-                    imshow(self.out_file['edge_todo'][:] *2.0 + self.out_file['edge_done'][:] *1.0 + self.out_file['slope'][:], cmap='jet')
-                    title('edge_done (1) edge_todo (2) + slope')
+                    imshow(self.out_file['aspect'][:] * 180 / np.pi, cmap='twilight')
+                    title('slope')
                     axis('scaled')
-                    clim(0, 3)
+                    clim(0, 360)
                     colorbar()
                     subplot(224)
                     if self._true_uca is None:
@@ -843,7 +904,7 @@ class ProcessManager(tl.HasTraits):
                     axis('scaled')
                     colorbar()
                     
-                    if self._true_uca is not None:
+                    if 0:#self._true_uca is not None:
                         fig = figure(figsize=(8, 4), dpi=200).number
                         subplot(221)
                         imshow(self.out_file['uca'][:, :] + self.out_file['uca_edges'][:, :] - self._true_uca_overlap)
@@ -927,12 +988,12 @@ class ProcessManager(tl.HasTraits):
 
         # create pool and queue
         if self.n_workers == 1:
+            intermediate_fun()
             for i, kwd in enumerate(kwds):
                 if not success[i]:
                     s = function(**kwd)
                     success[i] = s[0]
                     print (s)
-            intermediate_fun()
             return success
         
         pool = Pool(processes=self.n_workers)
