@@ -36,7 +36,9 @@ class TestMultiFileEndToEnd(object):
         fn = glob.glob(os.path.join(cls.DIR_NAME_SF, 'chunks', '*'))[0]
         dp_single = DEMProcessor(fn)
         dp_single.dX[:] = 1
-        dp_single.dY[:] = 1        
+        dp_single.dY[:] = 1
+        dp_single.dX2[:] = 1
+        dp_single.dY2[:] = 1        
         dp_single.calc_twi()
         cls.dp_single = dp_single
         

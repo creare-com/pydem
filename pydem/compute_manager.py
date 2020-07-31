@@ -46,8 +46,11 @@ def calc_elev_cond(fn, out_fn, out_slice, dtype=np.float64):
         dp = DEMProcessor(**kwargs)
         if DEBUG:
             dp.dX[:] = 1
-            dp.dY[:] = 1        
+            dp.dY[:] = 1
+            dp.dX2[:] = 1
+            dp.dY2[:] = 1
         dp.calc_fill_flats()
+        
         elev = dp.elev.astype(dtype)
         save_result(elev, out_fn, out_slice)
     except Exception as e:
@@ -63,7 +66,9 @@ def calc_aspect_slope(fn, out_fn_aspect, out_fn_slope, out_fn, out_slice, dtype=
         dp = DEMProcessor(**kwargs)
         if DEBUG:
             dp.dX[:] = 1
-            dp.dY[:] = 1        
+            dp.dY[:] = 1
+            dp.dX2[:] = 1
+            dp.dY2[:] = 1
         
         dp.calc_slopes_directions()
         save_result(dp.direction.astype(dtype), out_fn_aspect, out_slice)
@@ -163,7 +168,9 @@ def calc_uca(fn, out_fn_uca, out_fn_todo, out_fn_done, out_fn, out_slice, edge_s
         dp = DEMProcessor(**kwargs)
         if DEBUG:
             dp.dX[:] = 1
-            dp.dY[:] = 1        
+            dp.dY[:] = 1
+            dp.dX2[:] = 1
+            dp.dY2[:] = 1
         
         dp.find_flats()
         dp.calc_uca(plotflag=False)
@@ -205,7 +212,9 @@ def calc_uca_ec(fn, out_fn_uca, out_fn_uca_edges, out_fn_todo, out_fn_done, out_
         dp = DEMProcessor(**kwargs)
         if DEBUG:
             dp.dX[:] = 1
-            dp.dY[:] = 1        
+            dp.dY[:] = 1
+            dp.dX2[:] = 1
+            dp.dY2[:] = 1
         
         dp.find_flats()
 
