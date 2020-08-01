@@ -183,6 +183,13 @@ def mk_dx_dy_from_geotif_layer(dataset):
     Extracts the change in x and y coordinates from the geotiff file. Presently
     only supports WGS-84 files.
     """
+    if dataset.crs.is_projected:
+        dX = np.ones(dataset.shape[0] - 1) * dataset.transform.a
+        dX2 = np.ones(dataset.shape[0]) * dataset.transform.a
+        dY = np.abs(np.ones(dataset.shape[0] - 1) * dataset.transform.e)
+        dY2 = np.abs(np.ones(dataset.shape[0]) * dataset.transform.e)
+        return dX, dY, dX2, dY2
+    
     wkt = dataset.crs.to_wkt()
     ellipsoid = wkt.split('SPHEROID["')[1].split('"')[0].replace(' ', '-')
     d = distance(ellipsoid=ellipsoid)
