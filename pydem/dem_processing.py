@@ -107,10 +107,13 @@ class DEMProcessor(tl.HasTraits):
     fill_flats_pits = tl.Bool(True)
     fill_flats_max_iter = tl.Int(10)
 
+    drain_pits_spill = tl.Bool(False) # Will be ignored if drain_pits or drain_flats is True
     drain_pits = tl.Bool(True)
+    drain_pits_path = tl.Bool(False)
+    drain_pits_min_border = tl.Bool(False)
     drain_flats = tl.Bool(False) # will be ignored if drain_pits is True
-    drain_pits_max_iter = tl.Int(100)
-    drain_pits_max_dist = tl.Int(20) # coordinate space
+    drain_pits_max_iter = tl.Int(128)
+    drain_pits_max_dist = tl.Int(32, allow_none=True) # coordinate space
     drain_pits_max_dist_XY = tl.Float(None, allow_none=True) # real space
 
     # When resolving drainage across edges, if maximum UCA is reached, should
@@ -135,40 +138,7 @@ class DEMProcessor(tl.HasTraits):
     done = tl.Instance(np.ndarray, None)  # Marks if edges are done
 
     plotflag = tl.Bool(False)  # Debug plots
-
-    dX = tt.Array(None, allow_none=True)  # delta x on 'fence' grid
-    dY = tt.Array(None, allow_none=True)  # delta y on 'fence' grid
-    dX2 = tt.Array(None, allow_none=True)  # delta x on 'post' grid
-    dY2 = tt.Array(None, allow_none=True)  # delta y on 'post' grid
     
-    
-    bounds = tl.List()
-    transform = tl.List()
-
-    def __init__(self, elev_fn=None, **kwargs):
-        if elev_fn:
-            kwds = (dem_processor_from_raster_kwargs(elev_fn))
-            kwds.update(kwargs)
-            kwargs = kwds
-        
-        super().__init__(**kwargs)
-
-    @tl.default('dX')
-    def _default_dX(self):
-        return np.ones(self.elev.shape[0] - 1)  # / self.elev.shape[1]  # dX only changes in latitude
-
-    @tl.default('dY')
-    def _default_dY(self):
-        return np.ones(self.elev.shape[0] - 1)  # / self.elev.shape[0]
-    
-    @tl.default('dX2')
-    def _default_dX2(self):
-        return np.ones(self.elev.shape[0])  # / self.elev.shape[1]  # dX only changes in latitude
-
-    @tl.default('dY2')
-    def _default_dY2(self):
-        return np.ones(self.elev.shape[0])  # / self.elev.shape[0]    
-
     flats = tl.Instance(np.ndarray, None)  # Boolean array indicating location of flats
 
     uca_saturation_limit = tl.Float(32)  # units of area
@@ -218,7 +188,50 @@ class DEMProcessor(tl.HasTraits):
                        [3, -1],
                        [3, 1],
                        [4, -1]
-                       ])
+                       ])    
+
+    dX = tt.Array(None, allow_none=True)  # delta x on 'fence' grid
+    dY = tt.Array(None, allow_none=True)  # delta y on 'fence' grid
+    dX2 = tt.Array(None, allow_none=True)  # delta x on 'post' grid
+    dY2 = tt.Array(None, allow_none=True)  # delta y on 'post' grid
+    
+    
+    bounds = tl.List()
+    transform = tl.List()
+
+    def __init__(self, elev_fn=None, **kwargs):
+        if elev_fn:
+            kwds = (dem_processor_from_raster_kwargs(elev_fn))
+            kwds.update(kwargs)
+            kwargs = kwds
+        if not isinstance(kwargs['dX'], np.ndarray):
+            if 'dX2' not in kwargs:
+                kwargs['dX2'] = np.ones(kwargs['elev'].shape[0]) * kwargs['dX']
+            kwargs['dX'] *= np.ones(kwargs['elev'].shape[0] - 1)
+        if not isinstance(kwargs['dY'], np.ndarray):
+            if 'dY2' not in kwargs:
+                kwargs['dY2'] = np.ones(kwargs['elev'].shape[0]) * kwargs['dY']
+            kwargs['dY'] *= np.ones(kwargs['elev'].shape[0] - 1)
+        
+            
+        
+        super().__init__(**kwargs)
+
+    @tl.default('dX')
+    def _default_dX(self):
+        return np.ones(self.elev.shape[0] - 1)  # / self.elev.shape[1]  # dX only changes in latitude
+
+    @tl.default('dY')
+    def _default_dY(self):
+        return np.ones(self.elev.shape[0] - 1)  # / self.elev.shape[0]
+    
+    @tl.default('dX2')
+    def _default_dX2(self):
+        return np.ones(self.elev.shape[0])  # / self.elev.shape[1]  # dX only changes in latitude
+
+    @tl.default('dY2')
+    def _default_dY2(self):
+        return np.ones(self.elev.shape[0])  # / self.elev.shape[0]    
 
     def get_fn(self, name=None):
         return get_fn(self.elev, name)
@@ -434,6 +447,10 @@ class DEMProcessor(tl.HasTraits):
 
         if self.fill_flats:
             self.calc_fill_flats()
+            
+        if self.drain_pits_path:
+            self.calc_pit_drain_paths()
+            
 
         # %% Calculate the slopes and directions based on the 8 sections from
         # Tarboton http://www.neng.usu.edu/cee/faculty/dtarb/96wr03137.pdf
@@ -711,8 +728,10 @@ class DEMProcessor(tl.HasTraits):
             data, dX, dY, direction, flats)
 
         # Build the drainage or adjacency matrix
+        print("Making adjacency matrix", end='')
         A = self._mk_adjacency_matrix(section, proportion, flats, data, mag, dX, dY)
         B = A.tocsr()
+        print('...done.')
 
         colsum = np.array(A.sum(1)).ravel()
         ids = colsum == 0  # If no one drains into me
@@ -931,9 +950,16 @@ class DEMProcessor(tl.HasTraits):
             pit_i, pit_j, pit_prop, flats, mag = \
                 self._mk_connectivity_pits(i12, flats, elev, mag, dX, dY)
 
+            # Cross out the entries for the pit drains
+            j.ravel()[pit_i] = -1
+            j.ravel()[pit_i + elev.size] = -1
+
             j = np.concatenate([j.ravel(), pit_j]).astype('int64')
             i = np.concatenate([i.ravel(), pit_i]).astype('int64')
             mat_data = np.concatenate([mat_data.ravel(), pit_prop])
+            #j = pit_j.astype('int64')
+            #i = pit_i.astype('int64')
+            #mat_data = pit_prop
 
         elif self.drain_flats:
             j1, j2, mat_data, flat_i, flat_j, flat_prop = \
@@ -943,14 +969,27 @@ class DEMProcessor(tl.HasTraits):
             j = np.concatenate([j.ravel(), flat_j]).astype('int64')
             i = np.concatenate([i.ravel(), flat_j]).astype('int64')
             mat_data = np.concatenate([mat_data.ravel(), flat_prop])
+        
+        elif self.drain_pits_spill:
+            pit_i, pit_j, pit_prop, flats, mag = \
+                self._mk_connectivity_pits_spill(i12, flats, elev, mag, dX, dY, i, j)
 
+            j = np.concatenate([j.ravel(), pit_j]).astype('int64')
+            i = np.concatenate([i.ravel(), pit_i]).astype('int64')
+            mat_data = np.concatenate([mat_data.ravel(), pit_prop])            
 
         # This prevents no-data values, remove connections when not present,
         # and makes sure that floating point precision errors do not
         # create circular references where a lower elevation cell drains
         # to a higher elevation cell
-        I = ~np.isnan(mat_data) & (j != -1) & (mat_data > 1e-8) \
-            & (elev.ravel()[j] <= elev.ravel()[i])
+        if self.drain_pits_spill or self.drain_pits_path:
+            ids = np.zeros(i.size, bool)
+            ids[elev.size * 2:] = True
+            I = ~np.isnan(mat_data) & (j != -1) & (mat_data > 1e-8) \
+                & ((elev.ravel()[j] <= elev.ravel()[i]) | ids)
+        else:
+            I = ~np.isnan(mat_data) & (j != -1) & (mat_data > 1e-8) \
+                & (elev.ravel()[j] <= elev.ravel()[i])
 
         mat_data = mat_data[I]
         j = j[I]
@@ -1097,26 +1136,48 @@ class DEMProcessor(tl.HasTraits):
         pit_prop = []
         warn_pits = []
 
-        pits = i12[flats & (elev > 0)]
+        pits_bool = flats & (elev > 0)
+        pits = i12[pits_bool]
         I = np.argsort(e[pits])
         for pit in pits[I]:
             # find drains
             pit_area = np.array([pit], 'int64')
 
             drain = None
+            border = get_border_index(pit_area, elev.shape, elev.size)
             epit = e[pit]
+            if self.drain_pits_min_border:
+                epit_border = e[border].min()
+            else:
+                epit_border = epit
+            #print(epit, epit_border)
+            path = [pit]
             for it in range(self.drain_pits_max_iter):
                 border = get_border_index(pit_area, elev.shape, elev.size)
 
                 eborder = e[border]
                 if eborder.size == 0:
-                    break                    
-                emin = eborder.min()
-                if emin < epit:
-                    drain = border[eborder < epit]
                     break
-
+                
+                emin = eborder.min()
+                # Separate out pits
+                ids = pits_bool.ravel()[border]
+                eborder_pits = eborder[ids]
+                eborder_nopits = eborder[~ids]
+                if eborder_nopits.size > 0:
+                     
+                    if eborder_nopits.min() < epit_border:
+                        drain = border[~ids][eborder_nopits < epit_border]
+                        break
+                if eborder_pits.size > 0:
+                    if eborder_pits.min() < epit:
+                        drain = border[ids][eborder_pits < epit]
+                        break
+                
+                path += border[eborder == emin].tolist()
                 pit_area = np.concatenate([pit_area, border[eborder == emin]])
+                #path += border.tolist()
+                #pit_area = np.concatenate([pit_area, border])
 
             if drain is None:
                 warn_pits.append(pit)
@@ -1152,18 +1213,172 @@ class DEMProcessor(tl.HasTraits):
                 dxy = dxy[b]
 
             # calculate magnitudes
-            s = (e[pit]-e[drain]) / dxy
+            s = np.abs(e[pit]-e[drain]) / dxy
 
-            # connectivity info
-            # TODO proportion calculation (_mk_connectivity_flats used elev?)
-            pit_i += [pit for i in drain]
-            pit_j += drain.tolist()
-            pit_prop += s.tolist()
+            if self.drain_pits_path:
+                if drain.size > 1:
+                    drain = drain[dxy == dxy.min()]
+                drain = drain[0]
+                def is_connected(ij1, ij2):
+                    return np.all([abs(i - j) <= 1 for i, j in zip(ij1, ij2)])
+                path += [drain]
+                ipath, jpath = np.unravel_index(path, elev.shape)
+                ipath = ipath.tolist()
+                jpath = jpath.tolist()
+                # We need to iterate backwards through this path (from the drain to the pit)
+                # to eliminate any unconnected bits
+                nexti = len(path) - 2
+                while nexti > 0:
+                    if is_connected((ipath[nexti], jpath[nexti]), (ipath[nexti + 1], jpath[nexti + 1])):
+                        nexti -= 1
+                    else:
+                        path.pop(nexti)
+                        ipath.pop(nexti)
+                        jpath.pop(nexti)
+                        nexti = min(nexti, len(path) - 2)
+                    if path[nexti] == pit:
+                        break
+                pit_i += path[nexti:-1]
+                pit_j += path[nexti + 1:]
+                pit_prop += [1] * len(path[nexti:-1])
+                
+            else:
+                # connectivity info
+                # TODO proportion calculation (_mk_connectivity_flats used elev?)
+                pit_i += [pit for i in drain]
+                pit_j += drain.tolist()
+                pit_prop += (s / s.sum()).tolist()
 
             # update pit magnitude and flats mask
             mag[ipit, jpit] = np.mean(s)
             flats[ipit, jpit] = False
 
+        if warn_pits:
+            warnings.warn("Warning %d pits had no place to drain to in this "
+                          "chunk" % len(warn_pits))
+
+        # Note: returning flats and mag here is not strictly necessary
+        return (np.array(pit_i, 'int64'),
+                np.array(pit_j, 'int64'),
+                np.array(pit_prop, 'float64'),
+                flats,
+                mag)
+    
+    def _mk_connectivity_pits_spill(self, i12, flats, elev, mag, dX, dY, i, j):
+        """
+        Helper function for _mk_adjacency_matrix. This is a more general
+        version of _mk_adjacency_flats which drains pits and flats to nearby
+        but non-adjacent pixels. The slope magnitude (and flats mask) is
+        updated for these pits and flats so that the TWI can be computed.
+        """
+
+        e = elev.ravel()
+
+        pit_i = []
+        pit_j = []
+        pit_prop = []
+        warn_pits = []
+
+        pits = i12[flats & (elev > 0)]
+        max_ind = i12.max()
+        I = np.argsort(e[pits])[::-1]
+        pits_border = np.zeros(elev.size, np.uint8)
+        test = np.zeros_like(elev)
+        for pi, pit in enumerate(pits[I]):
+            # find drains
+            border = np.array([pit], 'int64')
+
+            inside_pit = pits_border[pit] > 0
+            #if inside_pit:
+                ## Then drain to the existing pit
+                ##drain = np.array([pits[I[pits_border[pit] - 1]]])
+                
+                ##pit_i += [pit for i in drain]
+                ##pit_j += drain.tolist()
+                ##pit_prop.extend([1] * drain.size)
+                
+                ### update pit magnitude and flats mask
+                ##mag[ipit, jpit] = np.abs(np.mean(s))
+                ##flats[ipit, jpit] = False                
+                #continue
+            
+            pits_border[pit] = pi + 1
+            test.ravel()[pit] = 1
+            drain = np.array([], np.int64)
+            for it in range(self.drain_pits_max_iter):
+                from matplotlib.pyplot import imshow, cla, show, title
+                border = get_border_index(border, elev.shape, elev.size)
+                #cla(); imshow(pits_border.reshape(elev.shape)); show()
+                #print(pits_border[border] <= pi * inside_pit)
+                border = border[pits_border[border] <= pi * inside_pit]
+                border = np.concatenate([border, drain])  # We need to check to make sure drains remain drains
+                pits_border[border] = pi + 1
+                #cla(); imshow(pits_border.reshape(elev.shape))
+                # Check to see if any border point does not drain into the old_border
+                drains1 = j.ravel()[border]
+                drains2 = j.ravel()[border + max_ind]
+                
+                a_spill = ((pits_border[drains1] <= inside_pit * pi) & (drains1 >= 0)) \
+                        | ((pits_border[drains2] <= inside_pit * pi) & (drains2 >= 0))
+
+                drain = border[a_spill]  # Save all the drains
+                pits_border[drain] = inside_pit * pi
+                
+                border = border[~a_spill]
+                #if (inside_pit and np.any(a_spill)) or np.all(a_spill) or len(border) == 0:
+                if np.all(a_spill) or len(border) == 0:
+                #if np.any(a_spill):
+                    break
+
+            if len(drain) == 0:
+                warn_pits.append(pit)
+                continue
+            
+            ipit, jpit = np.unravel_index(pit, elev.shape)
+            Idrain, Jdrain = np.unravel_index(drain, elev.shape)
+
+            # filter by drain distance in coordinate space
+            if self.drain_pits_max_dist:
+                dij = np.sqrt((ipit - Idrain)**2 + (jpit-Jdrain)**2)
+                b = dij <= self.drain_pits_max_dist
+                if not b.any():
+                    warn_pits.append(pit)
+                    continue
+                drain = drain[b]
+                Idrain = Idrain[b]
+                Jdrain = Jdrain[b]
+
+
+            # filter by drain distance in real space
+            # calculate real distances
+            dx = [_get_dX_mean(dX, ipit, idrain) * (jpit - jdrain)
+                  for idrain, jdrain in zip(Idrain, Jdrain)]
+            dy = [dY[make_slice(ipit, idrain)].sum() for idrain in Idrain]
+            dxy = np.sqrt(np.array(dx)**2 + np.array(dy)**2)
+            
+            if self.drain_pits_max_dist_XY:
+                b = dxy <= self.drain_pits_max_dist_XY
+                if not b.any():
+                    warn_pits.append(pit)
+                    continue
+                drain = drain[b]
+                dxy = dxy[b]
+
+            # calculate magnitudes
+            s = (e[pit]-e[drain]) / dxy
+
+            # connectivity info
+            # TODO proportion calculation (_mk_connectivity_flats used elev?)
+            if drain.size > 1:
+                drain = np.array([drain[np.argmin(dxy)]])
+            pit_i += [pit for i in drain]
+            pit_j += drain.tolist()
+            pit_prop.extend([1] * drain.size)
+            
+            # update pit magnitude and flats mask
+            mag[ipit, jpit] = np.abs(np.mean(s))
+            flats[ipit, jpit] = False
+        #cla(); imshow(pits_border.reshape(elev.shape)); show()
         if warn_pits:
             warnings.warn("Warning %d pits had no place to drain to in this "
                           "chunk" % len(warn_pits))
