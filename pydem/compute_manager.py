@@ -1,10 +1,7 @@
 # -*- coding: utf-8 -*-
 # NOTES
-# TODO: Fix edge resolution corners bug and multi-contributions bug
-# TODO: Ensure that 'success' is written out to a file.
 # TODO: Clean up filenames -- should be attributes of class
 # TODO: Make a final seamless result with no overlaps -- option to save out to GeoTIFF, and quantize data for cheaper storage
-# TODO: Fix the whole dX dY debacle 
 # TODO: Need to pass along user defined KWARGS
 
 import os
@@ -50,6 +47,7 @@ def calc_elev_cond(fn, out_fn, out_slice, dtype=np.float64):
             dp.dX2[:] = 1
             dp.dY2[:] = 1
         dp.calc_fill_flats()
+        dp.calc_pit_drain_paths()
         
         elev = dp.elev.astype(dtype)
         save_result(elev, out_fn, out_slice)
