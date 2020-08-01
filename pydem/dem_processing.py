@@ -107,12 +107,12 @@ class DEMProcessor(tl.HasTraits):
     fill_flats_pits = tl.Bool(True)
     fill_flats_max_iter = tl.Int(10)
 
-    drain_pits_spill = tl.Bool(False) # Will be ignored if drain_pits or drain_flats is True
     drain_pits = tl.Bool(True)
-    drain_pits_path = tl.Bool(False)
+    drain_pits_path = tl.Bool(True)
     drain_pits_min_border = tl.Bool(False)
+    drain_pits_spill = tl.Bool(False) # Will be ignored if drain_pits or drain_flats is True -- not a great option
     drain_flats = tl.Bool(False) # will be ignored if drain_pits is True
-    drain_pits_max_iter = tl.Int(128)
+    drain_pits_max_iter = tl.Int(300)
     drain_pits_max_dist = tl.Int(32, allow_none=True) # coordinate space
     drain_pits_max_dist_XY = tl.Float(None, allow_none=True) # real space
 
@@ -401,6 +401,128 @@ class DEMProcessor(tl.HasTraits):
                 self.filledPits[obj] += 1*mask
         self.elev = self.filledPits
 
+    def calc_pit_drain_paths(self):
+        """
+        Helper function for _mk_adjacency_matrix. This is a more general
+        version of _mk_adjacency_flats which drains pits and flats to nearby
+        but non-adjacent pixels. The slope magnitude (and flats mask) is
+        updated for these pits and flats so that the TWI can be computed.
+        """
+        elev, dX, dY = self.elev, self.dX, self.dY
+        e = elev.ravel()
+
+        pit_i = []
+        pit_j = []
+        pit_prop = []
+        warn_pits = []
+        
+        if self.fill_flats_below_sea: sea_mask = e != 0
+        else: sea_mask = e > 0
+        footprint = np.ones((3, 3), dtype=bool)
+        footprint [1, 1] = False
+        pits_bool = (spndi.minimum_filter(elev, footprint=footprint).ravel() > e) & sea_mask
+
+        pits = np.where(pits_bool.ravel())[0]
+        I = np.argsort(e[pits])
+        maxiter = 0
+        for pit in pits[I]:
+            # find drains
+            pit_area = np.array([pit], 'int64')
+
+            drain = None
+            border = get_border_index(pit_area, elev.shape, elev.size)
+            epit = e[pit]
+            path = [pit]
+            for it in range(self.drain_pits_max_iter):
+                border = get_border_index(pit_area, elev.shape, elev.size)
+
+                eborder = e[border]
+                if eborder.size == 0:
+                    break
+                
+                emin = eborder.min()
+                eminI = eborder == emin
+                if emin < epit:
+                    drain = border[eminI]
+                    break
+                
+                path += border[eminI].tolist()
+                pit_area = np.concatenate([pit_area, border[eminI]])
+            
+            if drain is None:
+                warn_pits.append(pit)
+                continue
+            maxiter = max(maxiter, it + 1)
+
+            ipit, jpit = np.unravel_index(pit, elev.shape)
+            Idrain, Jdrain = np.unravel_index(drain, elev.shape)
+
+            # filter by drain distance in coordinate space
+            if self.drain_pits_max_dist:
+                dij = np.sqrt((ipit - Idrain)**2 + (jpit-Jdrain)**2)
+                b = dij <= self.drain_pits_max_dist
+                if not b.any():
+                    warn_pits.append(pit)
+                    continue
+                drain = drain[b]
+                Idrain = Idrain[b]
+                Jdrain = Jdrain[b]
+
+            # calculate real distances
+            dx = [_get_dX_mean(dX, ipit, idrain) * (jpit - jdrain)
+                  for idrain, jdrain in zip(Idrain, Jdrain)]
+            dy = [dY[make_slice(ipit, idrain)].sum() for idrain in Idrain]
+            dxy = np.sqrt(np.array(dx)**2 + np.array(dy)**2)
+
+            # filter by drain distance in real space
+            if self.drain_pits_max_dist_XY:
+                b = dxy <= self.drain_pits_max_dist_XY
+                if not b.any():
+                    warn_pits.append(pit)
+                    continue
+                drain = drain[b]
+                dxy = dxy[b]
+
+            # Calculate the drain path
+            if drain.size > 1:
+                drain = drain[dxy == dxy.min()]
+            drain = drain[0]
+            def is_connected(ij1, ij2):
+                return np.all([abs(i - j) <= 1 for i, j in zip(ij1, ij2)])
+            path += [drain]
+            ipath, jpath = np.unravel_index(path, elev.shape)
+            ipath = ipath.tolist()
+            jpath = jpath.tolist()
+            # We need to iterate backwards through this path (from the drain to the pit)
+            # to eliminate any unconnected bits
+            nexti = len(path) - 2
+            while nexti > 0:
+                if is_connected((ipath[nexti], jpath[nexti]), (ipath[nexti + 1], jpath[nexti + 1])):
+                    nexti -= 1
+                else:
+                    path.pop(nexti)
+                    ipath.pop(nexti)
+                    jpath.pop(nexti)
+                    nexti = min(nexti, len(path) - 2)
+                if path[nexti] == pit:
+                    break
+            
+            # Update the elevation so that the elevation decreases from pit to drain
+            if e[pit] < e[drain]:
+                e[pit] = e[path][e[path] > e[drain]].min()
+                
+            si = e[drain] - e[pit]
+            e[path] = e[pit] + np.linspace(0, 1, len(path) ) * si
+
+        if warn_pits:
+            warnings.warn("Warning %d pits had no place to drain to in this "
+                          "chunk" % len(warn_pits))
+
+        # Note: returning elev here is not strictly necessary
+        print ("... done draining pits with maxiter = {}".format(maxiter))
+        self.elev = elev
+        return elev
+
 
     def calc_fill_flats(self):
         """
@@ -432,7 +554,6 @@ class DEMProcessor(tl.HasTraits):
             self._fill_flat(data[obj], filled[obj], flats[obj]==i+1, edge[obj])
         self.elev = filled
 
-
         # if debug:
         #     from matplotlib import pyplot
         #     from utils import plot_flat
@@ -446,15 +567,16 @@ class DEMProcessor(tl.HasTraits):
         """
 
         if self.fill_flats:
+            print ("Conditioning Elevation: Filling Flats...")
             self.calc_fill_flats()
             
         if self.drain_pits_path:
+            print ("Conditioning Elevation: Draining pits along min elevation path...")
             self.calc_pit_drain_paths()
-            
 
         # %% Calculate the slopes and directions based on the 8 sections from
         # Tarboton http://www.neng.usu.edu/cee/faculty/dtarb/96wr03137.pdf
-        print("starting slope/direction calculation")
+        print("Starting slope/direction calculation...")
         self.mag, self.direction = self._slopes_directions(
                 self.elev, self.dX, self.dY, 'tarboton')
         # Find the flat regions. This is mostly simple (look for mag < 0),
@@ -512,7 +634,7 @@ class DEMProcessor(tl.HasTraits):
         """
         Extend flats 1 square downstream
         Flats on the downstream side of the flat might find a valid angle,
-        but that doesn't mean that it's a correct angle. We have to find
+        but that doesn't mean that it'` a correct angle. We have to find
         these and then set them equal to a flat
         """
 
@@ -982,7 +1104,7 @@ class DEMProcessor(tl.HasTraits):
         # and makes sure that floating point precision errors do not
         # create circular references where a lower elevation cell drains
         # to a higher elevation cell
-        if self.drain_pits_spill or self.drain_pits_path:
+        if self.drain_pits_spill:
             ids = np.zeros(i.size, bool)
             ids[elev.size * 2:] = True
             I = ~np.isnan(mat_data) & (j != -1) & (mat_data > 1e-8) \
@@ -1215,39 +1337,11 @@ class DEMProcessor(tl.HasTraits):
             # calculate magnitudes
             s = np.abs(e[pit]-e[drain]) / dxy
 
-            if self.drain_pits_path:
-                if drain.size > 1:
-                    drain = drain[dxy == dxy.min()]
-                drain = drain[0]
-                def is_connected(ij1, ij2):
-                    return np.all([abs(i - j) <= 1 for i, j in zip(ij1, ij2)])
-                path += [drain]
-                ipath, jpath = np.unravel_index(path, elev.shape)
-                ipath = ipath.tolist()
-                jpath = jpath.tolist()
-                # We need to iterate backwards through this path (from the drain to the pit)
-                # to eliminate any unconnected bits
-                nexti = len(path) - 2
-                while nexti > 0:
-                    if is_connected((ipath[nexti], jpath[nexti]), (ipath[nexti + 1], jpath[nexti + 1])):
-                        nexti -= 1
-                    else:
-                        path.pop(nexti)
-                        ipath.pop(nexti)
-                        jpath.pop(nexti)
-                        nexti = min(nexti, len(path) - 2)
-                    if path[nexti] == pit:
-                        break
-                pit_i += path[nexti:-1]
-                pit_j += path[nexti + 1:]
-                pit_prop += [1] * len(path[nexti:-1])
-                
-            else:
-                # connectivity info
-                # TODO proportion calculation (_mk_connectivity_flats used elev?)
-                pit_i += [pit for i in drain]
-                pit_j += drain.tolist()
-                pit_prop += (s / s.sum()).tolist()
+            # connectivity info
+            # TODO proportion calculation (_mk_connectivity_flats used elev?)
+            pit_i += [pit for i in drain]
+            pit_j += drain.tolist()
+            pit_prop += (s / s.sum()).tolist()
 
             # update pit magnitude and flats mask
             mag[ipit, jpit] = np.mean(s)
