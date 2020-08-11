@@ -681,6 +681,64 @@ class ProcessManager(tl.HasTraits):
 
         self.out_file_noverlap = zarr.open(new_fn)
         self.out_path_noverlap = new_fn
+        
+    def save_geotiff(self, filename, key, dtype, max_files=2, rescale=None, overview_type=None, overview_factors=None):
+        '''
+        filename: str
+            Name of the new file
+        key: str
+            key of the dataset that should be saved
+        dtype: str, np.dtype`
+            datatype for the resulting data
+        max_files: int, optional
+            Default is 2. Maximum number of files we can automatically break the data into, depending on mismatches of deltas. If 
+            the number is exceeded an error is raised
+        rescale: tuple, optional
+            Default is None. data_rescaled = (data - rescale[0]) / (rescale[1] - rescale[0]) * rescale[2]
+            This is useful for quantizing the data into an integer format to get a higher compression ratio
+        overview_type: str, optional
+            Default is None. If not None, will build overviews of the specified type for the file. 
+        overview_factors: tuple, optional
+            Default is (3**1, 3**2, 3**3, ...). Factors for the overview resolutions.
+        '''
+        zf  = self.out_file_noverlap[key]
+        
+        # Create the geotransform(s) for the large file
+        lat_check_ids = self.grid_id2i.max(axis=1)
+        dlats = np.unique(self.index[lat_check_ids, self._i('dlat')])
+        lon_check_ids = self.grid_id2i.max(axis=0)
+        dlons = np.unique(self.index[lon_check_ids, self._i('dlon')])
+        if (dlats.size > 1) or (dlons.size > 1):
+            raise NotImplementedError
+        
+        top = self.index[:, self._i('top')].max()
+        bottom = self.index[:, self._i('bottom')].min()
+        left = self.index[:, self._i('left')].min()
+        right = self.index[:, self._i('right')].max()
+        dlat = (bottom - top) / self.grid_size_tot_unique[0]
+        dlon = (right - left) / self.grid_size_tot_unique[1]
+        transform = rasterio.transform.Affine.translation(left, top) * rasterio.transform.Affine.scale(dlon, dlat)
+        with rasterio.open(
+                    filename, 'w', compress="LZW",
+                    width=self.grid_size_tot_unique[1], height=self.grid_size_tot_unique[0],
+                    tiled=True, blockxsize=512, blockysize=512,
+                    transform=transform
+                ) as dataset:
+            for i in range(int(np.ceil(self.grid_size_tot_unique[0] / 512))):
+                print("Writing block %d of %d" % (i, self.grid_size_tot_unique[0] // 512))
+                for j in range(int(np.ceil(self.grid_size_tot_unique[1] / 512))):
+                    slc = (slice(i * 512, (i + 1) * 512), slice(j * 512, (j + 1) * 512))
+                    window = rasterio.windows.Window.from_slices(*slc)
+                    data = zf[slc]
+                    if rescale:
+                        data = (data - rescale[0]) / (rescale[1] - rescale[0]) * rescale[2]
+                    dataset.write(data, window=window, indexes=1)
+
+            if overview_type is not None:
+                if overview_factors is None:
+                    overview_factors = [3**i for i in range(1, int(np.log(max(self.grid_size_tot_unique)) / np.log(3)))]
+                dataset.build_overviews(overview_factors, getattr(rasterio.enums.Resampling, overview_type))
+                dataset.update_tags(ns='rio_overview', resampling='average')
 
     def process_overviews(self, out_path, keys=['elev', 'uca', 'aspect', 'slope', 'twi'], overviews=[3, 3**2, 3**3, 3**4, 3**5, 3**6, 3**7]):
         for key in keys:
