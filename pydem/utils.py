@@ -197,23 +197,21 @@ def mk_dx_dy_from_geotif_layer(dataset):
     lon = dataset.transform.d + dx / 2
     dy = dataset.transform.e
     lat = dataset.transform.f + dy / 2
-    lat = np.clip(lat, 90, -90)
     dX = np.zeros((dataset.shape[0] - 1))
     for j in range(len(dX)):
-        dX[j] = d.measure((lat + dy * (j + 1), lon + dx), (lat + dy * (j + 1), lon)) * 1000  # km2m
+        dX[j] = d.measure((np.clip(lat + dy * (j + 1), -90, 90), lon + dx), (lat + dy * (j + 1), lon)) * 1000  # km2m
     dY = np.zeros((dataset.shape[0] - 1))
     for i in range(len(dY)):
-        dY[i] = d.measure((lat + dy * i, lon), (lat + dy * (i + 1), lon)) * 1000  # km2m
+        dY[i] = d.measure((np.clip(lat + dy * i, -90, 90), lon), (lat + dy * (i + 1), lon)) * 1000  # km2m
         
     lon = dataset.transform.d + dx 
     lat = dataset.transform.f + dy 
-    lat = np.clip(lat, 90, -90)
     dX2 = np.zeros((dataset.shape[0]))
     for j in range(len(dX2)):
-        dX2[j] = d.measure((lat + dy * (j + 1), lon + dx), (lat + dy * (j + 1), lon)) * 1000  # km2m    
+        dX2[j] = d.measure((np.clip(lat + dy * (j + 1), -90, 90), lon + dx), (lat + dy * (j + 1), lon)) * 1000  # km2m    
     dY2 = np.zeros((dataset.shape[0]))
     for i in range(len(dY2)):
-        dY2[i] = d.measure((lat + dy * i, lon), (lat + dy * (i + 1), lon)) * 1000  # km2m
+        dY2[i] = d.measure((np.clip(lat + dy * i, -90, 90), lon), (lat + dy * (i + 1), lon)) * 1000  # km2m
         
     return dX, dY, dX2, dY2
 
