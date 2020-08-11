@@ -655,8 +655,10 @@ class ProcessManager(tl.HasTraits):
         for i in range(self.n_inputs):
             ii = self.grid_id[i, 0]
             jj = self.grid_id[i, 1]
-            slc = (slice(grid_lat_size_cumulative[ii], grid_lat_size_cumulative[ii + 1]),
-                   slice(grid_lon_size_cumulative[jj], grid_lon_size_cumulative[jj + 1]))
+            slc = (slice(grid_lat_size_cumulative[ii], grid_lat_size_cumulative[ii] \
+                         + self.grid_slice_unique[i][0].stop - self.grid_slice_unique[i][0].start),
+                   slice(grid_lon_size_cumulative[jj], grid_lon_size_cumulative[jj] \
+                         + self.grid_slice_unique[i][1].stop - self.grid_slice_unique[i][1].start))
             grid_slice.append(slc)
 
         self.grid_slice_noverlap = grid_slice
