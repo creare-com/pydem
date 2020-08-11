@@ -942,9 +942,9 @@ class ProcessManager(tl.HasTraits):
                 I = np.argpartition(-mets[:, 0], self.n_workers * 2)
             return mets, I
 
+        I_old = np.zeros_like(I)
         # Non-parallel case (useful for debuggin)
         if self.n_workers == 1:
-            I_old = np.zeros_like(I)
             count = 0
             while np.any(I_old != I):
                 if self._debug:# and count >= 88:
@@ -1025,7 +1025,7 @@ class ProcessManager(tl.HasTraits):
         active = [a for a in active if mets[a, 0] > 0]
         res = [pool.apply_async(calc_uca_ec, kwds=kwds[i]) for i in active]
         print ("Starting with {}".format(active))
-        while res:
+        while res or np.any(I_old != I):
             # monitor and submit new workers as needed
             finished = []
             finished_res = []
@@ -1041,6 +1041,7 @@ class ProcessManager(tl.HasTraits):
                     pass
             if not finished: continue
             mets, I = check_mets(finished)
+            I_old[:] = I[:]
             active = [a for a in active if a not in finished]
             res = [r for i, r in enumerate(res) if i not in finished_res]
             candidates = I[:self.n_workers * 2].tolist()
