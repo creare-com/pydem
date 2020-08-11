@@ -1,0 +1,3 @@
+LIBRARY cyutils.pyd
+EXPORTS
+initcyutils
