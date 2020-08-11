@@ -195,7 +195,6 @@ def mk_dx_dy_from_geotif_layer(dataset):
     d = distance(ellipsoid=ellipsoid)
     dx = dataset.transform.a
     lon = dataset.transform.d + dx / 2
-    lon = np.clip(-180, 180)
     dy = dataset.transform.e
     lat = dataset.transform.f + dy / 2
     lat = np.clip(lat, 90, -90)
