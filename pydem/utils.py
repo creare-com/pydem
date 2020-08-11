@@ -195,8 +195,10 @@ def mk_dx_dy_from_geotif_layer(dataset):
     d = distance(ellipsoid=ellipsoid)
     dx = dataset.transform.a
     lon = dataset.transform.d + dx / 2
+    lon = np.clip(-180, 180)
     dy = dataset.transform.e
     lat = dataset.transform.f + dy / 2
+    lat = np.clip(lat, 90, -90)
     dX = np.zeros((dataset.shape[0] - 1))
     for j in range(len(dX)):
         dX[j] = d.measure((lat + dy * (j + 1), lon + dx), (lat + dy * (j + 1), lon)) * 1000  # km2m
@@ -206,6 +208,7 @@ def mk_dx_dy_from_geotif_layer(dataset):
         
     lon = dataset.transform.d + dx 
     lat = dataset.transform.f + dy 
+    lat = np.clip(lat, 90, -90)
     dX2 = np.zeros((dataset.shape[0]))
     for j in range(len(dX2)):
         dX2[j] = d.measure((lat + dy * (j + 1), lon + dx), (lat + dy * (j + 1), lon)) * 1000  # km2m    

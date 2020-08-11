@@ -181,6 +181,8 @@ def calc_uca(fn, out_fn_uca, out_fn_todo, out_fn_done, out_fn, out_slice, edge_s
 
 def calc_uca_ec_metrics(fn_uca, fn_done, fn_todo, slc, edge_slc):
         # get the edge data
+    try:
+         
         edge_data = [zarr.open(fn_uca, mode='a')[edge_slc[key]] for key in edge_slc.keys()]
         edge_done = [zarr.open(fn_done, mode='a')[edge_slc[key]]
                 for key in edge_slc.keys()]
@@ -198,6 +200,9 @@ def calc_uca_ec_metrics(fn_uca, fn_done, fn_todo, slc, edge_slc):
         p_done = n_done / (1e-16 + p_done)
         # return (n_coulddo, p_done, n_done)
         return [(p_done, n_done)]
+    except:
+        return None
+        
 
 def calc_uca_ec(fn, out_fn_uca, out_fn_uca_edges, out_fn_todo, out_fn_done, out_fn, out_slice, edge_slice, dtype=np.float64):
     #if 1:
@@ -807,7 +812,7 @@ class ProcessManager(tl.HasTraits):
         if index is None:
             index = range(self.n_inputs)
         if out_uca is None:
-           out_uca = os.path.join(self.out_path, 'uca')
+            out_uca = os.path.join(self.out_path, 'uca')
         else:
             out_uca = os.path.join(self.out_path, out_uca)
         out_edge_done = os.path.join(self.out_path, 'edge_done')
@@ -827,6 +832,8 @@ class ProcessManager(tl.HasTraits):
 
         metrics = self.queue_processes(calc_uca_ec_metrics, kwds)
         for i, ind in enumerate(index):
+            if metrics[i] is None:
+                continue
             zf[ind] = metrics[i]
         return zf[:]
 
@@ -868,6 +875,8 @@ class ProcessManager(tl.HasTraits):
                 if i > 0: check_met_inds.append(self.grid_id2i[i-1, j])
                 # bottom
                 if i < self.grid_id2i.shape[0] - 1: check_met_inds.append(self.grid_id2i[i+1, j])
+            check_met_inds = np.unique(check_met_inds)
+            check_met_inds = check_met_inds[check_met_inds != -1].tolist()
             mets = self.update_uca_edge_metrics('uca', check_met_inds)
             if mets.shape[0] == 1:
                 I = np.zeros(1, int)
