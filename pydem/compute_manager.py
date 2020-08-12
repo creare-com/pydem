@@ -716,7 +716,7 @@ class ProcessManager(tl.HasTraits):
                 e['slc2'] = self.grid_slice_unique[i]
                 kwds.append(e)
 
-        success = self.queue_processes(copy_result, kwds, success=self.out_file['success'][:, 3])
+        success = self.queue_processes(copy_result, kwds)
         return success
 
         
