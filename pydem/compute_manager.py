@@ -707,7 +707,6 @@ class ProcessManager(tl.HasTraits):
             zf = zarr.open(entry['zf1'],
                            shape=self.grid_size_tot_unique,
                            chunks=chunks, mode='a', dtype=self.dtype)
-            zf.close()
             entry['zf2'] = os.path.join(self.out_path, key)
             if key == 'uca':
                 entry['zf3'] = os.path.join(self.out_path, key + '_edges')
