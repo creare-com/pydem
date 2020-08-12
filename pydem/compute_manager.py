@@ -721,14 +721,16 @@ class ProcessManager(tl.HasTraits):
         return success
 
         
-    def save_geotiff(self, filename, key, dtype, max_files=2, rescale=None, overview_type=None, overview_factors=None):
+    def save_geotiff(self, filename, key, dtype, crs=None, max_files=2, rescale=None, overview_type=None, overview_factors=None):
         '''
         filename: str
             Name of the new file
         key: str
             key of the dataset that should be saved
-        dtype: str, np.dtype`
+        dtype: str, np.dtype
             datatype for the resulting data
+        crs: str, optional
+            The coordinate reference system. Default is rasterio.open(self.elev_source_files[0], 'r').crs
         max_files: int, optional
             Default is 2. Maximum number of files we can automatically break the data into, depending on mismatches of deltas. If 
             the number is exceeded an error is raised
@@ -741,6 +743,10 @@ class ProcessManager(tl.HasTraits):
             Default is (3**1, 3**2, 3**3, ...). Factors for the overview resolutions.
         '''
         zf  = self.out_file_noverlap[key]
+        
+        if crs is None:
+            crs = rasterio.open(self.elev_source_files[0], 'r').crs
+            
         
         # Create the geotransform(s) for the large file
         lat_check_ids = self.grid_id2i.max(axis=1)
@@ -761,6 +767,10 @@ class ProcessManager(tl.HasTraits):
                     filename, 'w', compress="LZW",
                     width=self.grid_size_tot_unique[1], height=self.grid_size_tot_unique[0],
                     tiled=True, blockxsize=512, blockysize=512,
+                    count=1,
+                    dtype=dtype,
+                    driver='GTiff',
+                    crs=crs,
                     transform=transform
                 ) as dataset:
             for i in range(int(np.ceil(self.grid_size_tot_unique[0] / 512))):
@@ -772,6 +782,7 @@ class ProcessManager(tl.HasTraits):
                     if rescale:
                         data = (data - rescale[0]) / (rescale[1] - rescale[0]) * rescale[2]
                     dataset.write(data, window=window, indexes=1)
+            dataset.update_tags(1, rescale=','.join([str(r) for r in rescale]))
 
             if overview_type is not None:
                 if overview_factors is None:
