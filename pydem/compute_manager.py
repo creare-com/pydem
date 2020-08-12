@@ -360,6 +360,16 @@ def save_result(result, out_fn, out_slice, test_func=_test_float):
         if count > 5:
             outstr += ':' + out_fn + '\n' + 'OUTPUT IS NOT CORRECTLY WRITTEN TO FILE'
             raise Exception(outstr)
+        
+def copy_result(zf1, zf2, slc1, slc2, zf3=None):
+    zf1 = zarr.open(zf1, 'a')
+    zf2 = zarr.open(zf2, 'r')
+    zf1[slc1] = zf2[slc2]
+    if zf3 is not None:
+        zf3 = zarr.open(zf3, 'r')
+        zf1[slc1] += zf3[slc2]
+    return (1, 1)
+    
 
 class ProcessManager(tl.HasTraits):
     _debug = tl.Bool(False)
@@ -672,17 +682,44 @@ class ProcessManager(tl.HasTraits):
         if chunks is None:
             chunks = [int(self.grid_size_tot_unique[0] // self.grid_lat_size_unique.size),
                       int(self.grid_size_tot_unique[1] // self.grid_lon_size_unique.size)]
+            
+        
+        if self.n_workers == 1:
+            for key in keys:
+                zf = zarr.open(os.path.join(new_fn, key),
+                               shape=self.grid_size_tot_unique,
+                               chunks=chunks, mode='a', dtype=self.dtype)
+                for i in range(self.n_inputs):
+                    zf[self.grid_slice_noverlap[i]] = self.out_file[key][self.grid_slice_unique[i]]
+                    if key == 'uca':
+                        zf[self.grid_slice_noverlap[i]] += self.out_file[key + '_edges'][self.grid_slice_unique[i]]
+                        
+            self.out_file_noverlap = zarr.open(new_fn)
+            self.out_path_noverlap = new_fn
+            return
+
+        # populate kwds
+        kwds = []
         for key in keys:
-            zf = zarr.open(os.path.join(new_fn, key),
+            entry = {}
+            entry['zf1'] = os.path.join(new_fn, key)
+            # Initialize file
+            zf = zarr.open(entry['zf1'],
                            shape=self.grid_size_tot_unique,
                            chunks=chunks, mode='a', dtype=self.dtype)
+            zf.close()
+            entry['zf2'] = os.path.join(self.out_path, key)
+            if key == 'uca':
+                entry['zf3'] = os.path.join(self.out_path, key + '_edges')
             for i in range(self.n_inputs):
-                zf[self.grid_slice_noverlap[i]] = self.out_file[key][self.grid_slice_unique[i]]
-                if key == 'uca':
-                    zf[self.grid_slice_noverlap[i]] += self.out_file[key + '_edges'][self.grid_slice_unique[i]]
+                e = entry.copy()
+                e['slc1'] = self.grid_slice_noverlap[i]
+                e['slc2'] = self.grid_slice_unique[i]
+                kwds.append(e)
 
-        self.out_file_noverlap = zarr.open(new_fn)
-        self.out_path_noverlap = new_fn
+        success = self.queue_processes(copy_result, kwds, success=self.out_file['success'][:, 3])
+        return success
+
         
     def save_geotiff(self, filename, key, dtype, max_files=2, rescale=None, overview_type=None, overview_factors=None):
         '''
