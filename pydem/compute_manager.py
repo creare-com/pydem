@@ -944,7 +944,7 @@ class ProcessManager(tl.HasTraits):
             zf[ind] = metrics[i]
         return zf[:]
 
-    def process_uca_edges(self):
+    def process_uca_edges(self, mets_type=0):
         out_uca = os.path.join(self.out_path, 'uca')
         out_uca_edges = os.path.join(self.out_path, 'uca_edges')
         out_edge_done = os.path.join(self.out_path, 'edge_done')
@@ -966,7 +966,7 @@ class ProcessManager(tl.HasTraits):
         if mets.shape[0] == 1:
             I = np.zeros(1, int)
         else:
-            I = np.argpartition(-mets[:, 0], self.n_workers * 2)
+            I = np.argpartition(-mets[:, mets_type], self.n_workers * 2)
 
         # Helper function for updating metrics
         def check_mets(finished):
@@ -988,7 +988,7 @@ class ProcessManager(tl.HasTraits):
             if mets.shape[0] == 1:
                 I = np.zeros(1, int)
             else:
-                I = np.argpartition(-mets[:, 0], self.n_workers * 2)
+                I = np.argpartition(-mets[:, mets_type], self.n_workers * 2)
             return mets, I
 
         I_old = np.zeros_like(I)
