@@ -776,18 +776,19 @@ class ProcessManager(tl.HasTraits):
                 print("Writing block %d of %d" % (i, self.grid_size_tot_unique[0] // 512))
                 for j in range(int(np.ceil(self.grid_size_tot_unique[1] / 512))):
                     slc = (slice(i * 512, (i + 1) * 512), slice(j * 512, (j + 1) * 512))
-                    window = rasterio.windows.Window.from_slices(*slc)
                     data = zf[slc]
+                    slc = (slice(i * 512, i * 512 + data.shape[0]), slice(j * 512, j * 512 + data.shape[1]))
+                    window = rasterio.windows.Window.from_slices(*slc)
                     if rescale:
                         data = (data - rescale[0]) / (rescale[1] - rescale[0]) * rescale[2]
-                    dataset.write(data, window=window, indexes=1)
+                    dataset.write(data.astype(dtype), window=window, indexes=1)
             dataset.update_tags(1, rescale=','.join([str(r) for r in rescale]))
 
             if overview_type is not None:
                 if overview_factors is None:
                     overview_factors = [3**i for i in range(1, int(np.log(max(self.grid_size_tot_unique)) / np.log(3)))]
                 dataset.build_overviews(overview_factors, getattr(rasterio.enums.Resampling, overview_type))
-                dataset.update_tags(ns='rio_overview', resampling='average')
+                dataset.update_tags(ns='rio_overview', resampling=overiview_type)
 
     def process_overviews(self, out_path, keys=['elev', 'uca', 'aspect', 'slope', 'twi'], overviews=[3, 3**2, 3**3, 3**4, 3**5, 3**6, 3**7]):
         for key in keys:
