@@ -719,6 +719,65 @@ class ProcessManager(tl.HasTraits):
         success = self.queue_processes(copy_result, kwds)
         return success
 
+    def save_non_overlap_data_geotiff(
+            self, 
+            dtype,
+            new_path=None,
+            keys=['elev', 'uca', 'aspect', 'slope', 'twi'],
+            chunks=None,
+            overview_type=None):
+        if new_path is None:
+            new_path = self.out_path.replace('.zarr', '')
+
+        if chunks is None:
+            chunks = [512, 512]
+            
+        if crs is None:
+            crs = rasterio.open(self.elev_source_files[0], 'r').crs
+            
+        # Create the geotransform(s) for the large file
+        lat_check_ids = self.grid_id2i.max(axis=1)
+        dlats = np.unique(self.index[lat_check_ids, self._i('dlat')])
+        lon_check_ids = self.grid_id2i.max(axis=0)
+        dlons = np.unique(self.index[lon_check_ids, self._i('dlon')])
+        if (dlats.size > 1) or (dlons.size > 1):
+            raise NotImplementedError
+        
+        top = self.index[:, self._i('top')].max()
+        bottom = self.index[:, self._i('bottom')].min()
+        left = self.index[:, self._i('left')].min()
+        right = self.index[:, self._i('right')].max()
+        dlat = (bottom - top) / self.grid_size_tot_unique[0]
+        dlon = (right - left) / self.grid_size_tot_unique[1]
+        transform = rasterio.transform.Affine.translation(left, top) * rasterio.transform.Affine.scale(dlon, dlat)
+        for key in keys:
+            filename = os.path.join(new_path, key + '.tiff')
+            with rasterio.open(
+                    filename, 'w', compress="LZW",
+                    width=self.grid_size_tot_unique[1], height=self.grid_size_tot_unique[0],
+                    tiled=True, blockxsize=chunks[0], blockysize=chunks[1],
+                    count=1,
+                    dtype=dtype,
+                    driver='GTiff',
+                    bigtiff=True,
+                    crs=crs,
+                    transform=transform
+                    ) as dataset:
+                
+                for i in range(self.n_inputs):
+                    dataset[self.grid_slice_noverlap[i]] = self.out_file[key][self.grid_slice_unique[i]]
+                    if key == 'uca':
+                        dataset[self.grid_slice_noverlap[i]] += self.out_file[key + '_edges'][self.grid_slice_unique[i]]
+                        
+                if overview_type is not None:
+                    if overview_factors is None:
+                        overview_factors = [3**i for i in range(1, int(np.log(max(self.grid_size_tot_unique)) / np.log(3)))]
+                        print("Using computed overview factors", overview_factors)
+                    dataset.build_overviews(overview_factors, getattr(rasterio.enums.Resampling, overview_type))
+                    dataset.update_tags(ns='rio_overview', resampling=overview_type)
+                    
+        return 
+
         
     def save_geotiff(self, filename, key, dtype, crs=None, max_files=2, rescale=None, overview_type=None, overview_factors=None):
         '''
@@ -769,6 +828,7 @@ class ProcessManager(tl.HasTraits):
                     count=1,
                     dtype=dtype,
                     driver='GTiff',
+                    bigtiff=True,
                     crs=crs,
                     transform=transform
                 ) as dataset:
@@ -788,7 +848,7 @@ class ProcessManager(tl.HasTraits):
                 if overview_factors is None:
                     overview_factors = [3**i for i in range(1, int(np.log(max(self.grid_size_tot_unique)) / np.log(3)))]
                 dataset.build_overviews(overview_factors, getattr(rasterio.enums.Resampling, overview_type))
-                dataset.update_tags(ns='rio_overview', resampling=overiview_type)
+                dataset.update_tags(ns='rio_overview', resampling=overview_type)
 
     def process_overviews(self, out_path, keys=['elev', 'uca', 'aspect', 'slope', 'twi'], overviews=[3, 3**2, 3**3, 3**4, 3**5, 3**6, 3**7]):
         for key in keys:
