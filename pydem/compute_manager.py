@@ -722,6 +722,7 @@ class ProcessManager(tl.HasTraits):
     def save_non_overlap_data_geotiff(
             self, 
             dtype,
+            crs=None,
             new_path=None,
             keys=['elev', 'uca', 'aspect', 'slope', 'twi'],
             chunks=None,
