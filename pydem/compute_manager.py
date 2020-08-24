@@ -726,7 +726,8 @@ class ProcessManager(tl.HasTraits):
             new_path=None,
             keys=['elev', 'uca', 'aspect', 'slope', 'twi'],
             chunks=None,
-            overview_type=None):
+            overview_type=None,
+            rescale=None):
         if new_path is None:
             new_path = self.out_path.replace('.zarr', '')
 
@@ -766,9 +767,16 @@ class ProcessManager(tl.HasTraits):
                     ) as dataset:
                 
                 for i in range(self.n_inputs):
-                    dataset[self.grid_slice_noverlap[i]] = self.out_file[key][self.grid_slice_unique[i]]
+                    print ("Writing {} of {}".format(i, self.n_inputs))
+                    data = self.out_file[key][self.grid_slice_unique[i]]
                     if key == 'uca':
-                        dataset[self.grid_slice_noverlap[i]] += self.out_file[key + '_edges'][self.grid_slice_unique[i]]
+                        data += self.out_file[key + '_edges'][self.grid_slice_unique[i]]
+                    slc = self.grid_slice_noverlap[i]
+                    window = rasterio.windows.Window.from_slices(*slc)
+                    if rescale:
+                        data = (data - rescale[0]) / (rescale[1] - rescale[0]) * rescale[2]
+            
+                    dataset.write(data.astype(dtype), window=window, indexes=1)
                         
                 if overview_type is not None:
                     if overview_factors is None:
