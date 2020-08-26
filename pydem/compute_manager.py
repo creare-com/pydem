@@ -737,6 +737,7 @@ class ProcessManager(tl.HasTraits):
             keys=['elev', 'uca', 'aspect', 'slope', 'twi'],
             chunks=None,
             overview_type=None,
+            overview_factors=None,
             rescale=None):
         if new_path is None:
             new_path = self.out_path.replace('.zarr', '')
@@ -797,7 +798,6 @@ class ProcessManager(tl.HasTraits):
                     
         return 
 
-        
     def save_geotiff(self, filename, key, dtype, crs=None, max_files=2, rescale=None, overview_type=None, overview_factors=None):
         '''
         filename: str
