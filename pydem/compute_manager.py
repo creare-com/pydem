@@ -651,12 +651,22 @@ class ProcessManager(tl.HasTraits):
             self.edge_data.append(edge_data)
 
         # Figure out size of the non-overlapping arrays
-        self.grid_lat_size_unique = np.array([
-            self.grid_slice_unique[i][0].stop - self.grid_slice_unique[i][0].start
-            for i in self.grid_id2i[:, 0]])
-        self.grid_lon_size_unique = np.array([
-            self.grid_slice_unique[i][1].stop - self.grid_slice_unique[i][1].start
-            for i in self.grid_id2i[0, :]])
+        self.grid_lat_size_unique =  np.nanmin(np.array(
+            [
+                [
+                    self.grid_slice_unique[i][0].stop - self.grid_slice_unique[i][0].start + 0 / np.array(i != -1)
+                    for i in self.grid_id2i[:, j]
+                ]
+                for j in range(self.grid_id2i.shape[1])
+            ]), axis=0)
+        self.grid_lon_size_unique = np.nanmin(np.array(
+            [
+                [
+                    self.grid_slice_unique[i][1].stop - self.grid_slice_unique[i][1].start + 0 / np.array(i != -1) 
+                    for i in self.grid_id2i[j, :]
+                ]
+                for j in range(self.grid_id2i.shape[0])
+            ]), axis=0)
 
         # Figure out the slices for the non-overlapping arrays
         grid_lat_size_cumulative = np.concatenate([[0], self.grid_lat_size_unique.cumsum()])
