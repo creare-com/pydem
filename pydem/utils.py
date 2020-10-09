@@ -34,14 +34,50 @@ Created on Tue Oct 14 17:25:50 2014
 """
 from geopy.distance import distance
 import os
-import gdal
-import osr
 import re
-from reader.gdal_reader import GdalReader
 
 import numpy as np
 from scipy.ndimage.filters import minimum_filter
 from scipy.ndimage.measurements import center_of_mass
+import rasterio
+
+def read_raster(fn):
+    return rasterio.open(fn)
+
+def dem_processor_from_raster_kwargs(fn):
+    dataset = read_raster(fn)
+    dx, dy, dx2, dy2 = mk_dx_dy_from_geotif_layer(dataset)
+    elev = dataset.read(1)
+    return dict(dX=dx, dY=dy, elev=elev, bounds=dataset.bounds, transform=dataset.transform,
+                dX2=dx2, dY2=dy2)
+
+def mk_transform(lat_top, lon_left, dlat, dlon, lat_lon_centered=False):
+    if lat_lon_centered:
+        lat_top -= dlat / 2  # expect dlat < 0
+        lon_left -= dlon / 2
+    transform = rasterio.transform.Affine.translation(lon_left, lat_top) \
+            * rasterio.transform.Affine.scale(dlon, dlat)
+    return transform
+
+def save_raster(fn, data, crs, transform=None, affine=None):
+    if transform is not None:
+        transform = rasterio.Affine.from_gdal(*transform)
+    elif affine is not None:
+        transform = affine
+        
+    kwargs2 = dict(
+        driver="GTiff",
+        height=data.shape[0],
+        width=data.shape[1],
+        count=1,
+        dtype=data.dtype,
+        crs=crs,
+        transform=transform,
+        mode="w",
+    )
+    with rasterio.open(fn, **kwargs2) as dst:
+        r = dst.write(data, 1)
+    return rasterio.open(fn, mode='r') 
 
 def rename_files(files, name=None):
     """
@@ -71,7 +107,7 @@ def rename_files(files, name=None):
         del elev
         fn = os.path.join(os.path.split(fil)[0], fn)
         os.rename(fil, fn)
-        print "Renamed", fil, "to", fn
+        print("Renamed", fil, "to", fn)
 
 
 def parse_fn(fn):
@@ -142,26 +178,45 @@ def get_fn_from_coords(coords, name=None):
     return new_name.replace('.', 'o') + '.tif'
 
 
-def mk_dx_dy_from_geotif_layer(geotif):
+def mk_dx_dy_from_geotif_layer(dataset):
     """
     Extracts the change in x and y coordinates from the geotiff file. Presently
     only supports WGS-84 files.
     """
-    ELLIPSOID_MAP = {'WGS84': 'WGS-84'}
-    ellipsoid = ELLIPSOID_MAP[geotif.grid_coordinates.wkt]
+    if dataset.crs.is_projected:
+        dX = np.ones(dataset.shape[0] - 1) * dataset.transform.a
+        dX2 = np.ones(dataset.shape[0]) * dataset.transform.a
+        dY = np.abs(np.ones(dataset.shape[0] - 1) * dataset.transform.e)
+        dY2 = np.abs(np.ones(dataset.shape[0]) * dataset.transform.e)
+        return dX, dY, dX2, dY2
+    
+    wkt = dataset.crs.to_wkt()
+    ellipsoid = wkt.split('SPHEROID["')[1].split('"')[0].replace(' ', '-')
     d = distance(ellipsoid=ellipsoid)
-    dx = geotif.grid_coordinates.x_axis
-    dy = geotif.grid_coordinates.y_axis
-    dX = np.zeros((dy.shape[0]-1))
-    for j in xrange(len(dX)):
-        dX[j] = d.measure((dy[j+1], dx[1]), (dy[j+1], dx[0])) * 1000  # km2m
-    dY = np.zeros((dy.shape[0]-1))
-    for i in xrange(len(dY)):
-        dY[i] = d.measure((dy[i], 0), (dy[i+1], 0)) * 1000  # km2m
-    return dX, dY
+    dx = dataset.transform.a
+    lon = dataset.transform.d + dx / 2
+    dy = dataset.transform.e
+    lat = dataset.transform.f + dy / 2
+    dX = np.zeros((dataset.shape[0] - 1))
+    for j in range(len(dX)):
+        dX[j] = d.measure((np.clip(lat + dy * (j + 1), -90, 90), lon + dx), (np.clip(lat + dy * (j + 1), -90, 90), lon)) * 1000  # km2m
+    dY = np.zeros((dataset.shape[0] - 1))
+    for i in range(len(dY)):
+        dY[i] = d.measure((np.clip(lat + dy * i, -90, 90), lon), (np.clip(lat + dy * (i + 1), -90, 90), lon)) * 1000  # km2m
+        
+    lon = dataset.transform.d + dx 
+    lat = dataset.transform.f + dy 
+    dX2 = np.zeros((dataset.shape[0]))
+    for j in range(len(dX2)):
+        dX2[j] = d.measure((np.clip(lat + dy * (j + 1), -90, 90), lon + dx), (np.clip(lat + dy * (j + 1), -90, 90), lon)) * 1000  # km2m    
+    dY2 = np.zeros((dataset.shape[0]))
+    for i in range(len(dY2)):
+        dY2[i] = d.measure((np.clip(lat + dy * i, -90, 90), lon), (np.clip(lat + dy * (i + 1), -90, 90), lon)) * 1000  # km2m
+        
+    return dX, dY, dX2, dY2
 
 
-def mk_geotiff_obj(raster, fn, bands=1, gdal_data_type=gdal.GDT_Float32,
+def mk_geotiff_obj(raster, fn, bands=1, gdal_data_type=np.float32,
                    lat=[46, 45], lon=[-73, -72]):
     """
     Creates a new geotiff file objects using the WGS84 coordinate system, saves
@@ -183,16 +238,13 @@ def mk_geotiff_obj(raster, fn, bands=1, gdal_data_type=gdal.GDT_Float32,
         [western lon, eastern lon]
     """
     NNi, NNj = raster.shape
-    driver = gdal.GetDriverByName('GTiff')
-    obj = driver.Create(fn, NNj, NNi, bands, gdal_data_type)
     pixel_height = -np.abs(lat[0] - lat[1]) / (NNi - 1.0)
     pixel_width = np.abs(lon[0] - lon[1]) / (NNj - 1.0)
-    obj.SetGeoTransform([lon[0], pixel_width, 0, lat[0], 0, pixel_height])
-    srs = osr.SpatialReference()
-    srs.SetWellKnownGeogCS('WGS84')
-    obj.SetProjection(srs.ExportToWkt())
-    obj.GetRasterBand(1).WriteArray(raster)
-    return obj, driver
+
+    transform = mk_transform(max(lat), min(lon), pixel_height, pixel_width, lat_lon_centered=True)
+    r = save_raster(fn, data=raster, crs="EPSG:4326", affine=transform)
+
+    return r, transform
 
 
 def sortrows(a, i=0, index_out=False, recurse=True):
@@ -247,7 +299,7 @@ def sortrows(a, i=0, index_out=False, recurse=True):
     if recurse & (len(a[0]) > i + 1):
         for b in np.unique(a[:, i]):
             ids = a[:, i] == b
-            colids = range(i) + range(i+1, len(a[0]))
+            colids = list(range(i)) + list(range(i+1, len(a[0])))
             a[np.ix_(ids, colids)], I2 = sortrows(a[np.ix_(ids, colids)],
                                                   0, True, True)
             I[ids] = I[np.nonzero(ids)[0][I2]]

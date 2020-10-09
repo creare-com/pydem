@@ -38,7 +38,7 @@ if __name__ == "__main__":
     files = os.listdir(path)
     files.sort()
     for i, fil in enumerate(files):
-        print i, fil
+        print(i, fil)
     delete_ids = [0, 1, 2, 3, 4, 5, 6, 9]
     for d_id in delete_ids:
         os.remove(os.path.join(path, files[d_id]))
@@ -59,21 +59,21 @@ if __name__ == "__main__":
     # THe only valuable information here is the edge_init_todo, which is self-set
     # In this case the right edge of the tile is the edge that needs,
     # information, so the right todo should be True
-    np.testing.assert_(np.all(edge_init_todo['right'][1:-1])) #don't look at corners
-    np.testing.assert_(np.all(~edge_init_todo['left'][1:-1])) #don't look at corners
+    np.testing.assertTrue(np.all(edge_init_todo['right'][1:-1])) #don't look at corners
+    np.testing.assertTrue(np.all(~edge_init_todo['left'][1:-1])) #don't look at corners
 
     # Next we check that the right and top neighbors are correctly set also
     top = pm.tile_edge.neighbors[esfile]['top']
     edge_init_data, edge_init_done, edge_init_todo = pm.tile_edge.get_edge_init_data(top)
-    np.testing.assert_(np.all(~edge_init_done['bottom'][1:-1])) #don't look at corners
+    np.testing.assertTrue(np.all(~edge_init_done['bottom'][1:-1])) #don't look at corners
 #    stop
     right = pm.tile_edge.neighbors[esfile]['right']
     edge_init_data, edge_init_done, edge_init_todo = pm.tile_edge.get_edge_init_data(right)
-    np.testing.assert_(np.all(~edge_init_done['left'][1:-1])) #don't look at corners
+    np.testing.assertTrue(np.all(~edge_init_done['left'][1:-1])) #don't look at corners
     topright = pm.tile_edge.neighbors[esfile]['top-right']
     edge_init_data, edge_init_done, edge_init_todo = pm.tile_edge.get_edge_init_data(topright)
-    np.testing.assert_(np.all(~edge_init_done['left'][1:-1])) #don't look at corners
-    np.testing.assert_(np.all(~edge_init_done['bottom'][1:-1])) #don't look at corners
+    np.testing.assertTrue(np.all(~edge_init_done['left'][1:-1])) #don't look at corners
+    np.testing.assertTrue(np.all(~edge_init_done['bottom'][1:-1])) #don't look at corners
     # pm.tile_edge.visualize_neighbors()
 
     # do the next tile
@@ -81,21 +81,21 @@ if __name__ == "__main__":
     fn, status = pm.calculate_twi(esfile,
                               save_path=pm.save_path, do_edges=False)
     edge_init_data, edge_init_done, edge_init_todo = pm.tile_edge.get_edge_init_data(esfile)
-    np.testing.assert_(np.all(~edge_init_todo['right'][1:-1]))
-    np.testing.assert_(np.all(~edge_init_todo['left'][1:-1]))
-    np.testing.assert_(np.all(~edge_init_todo['top'][1:-1]))
-    np.testing.assert_(np.all(~edge_init_todo['bottom'][1:-1]))
+    np.testing.assertTrue(np.all(~edge_init_todo['right'][1:-1]))
+    np.testing.assertTrue(np.all(~edge_init_todo['left'][1:-1]))
+    np.testing.assertTrue(np.all(~edge_init_todo['top'][1:-1]))
+    np.testing.assertTrue(np.all(~edge_init_todo['bottom'][1:-1]))
     # Next we check that the left and top neighbors are correctly set also
     top = pm.tile_edge.neighbors[esfile]['top']
     edge_init_data, edge_init_done, edge_init_todo = pm.tile_edge.get_edge_init_data(top)
-    np.testing.assert_(np.all(edge_init_done['bottom']))
+    np.testing.assertTrue(np.all(edge_init_done['bottom']))
     left = pm.tile_edge.neighbors[esfile]['left']
     edge_init_data, edge_init_done, edge_init_todo = pm.tile_edge.get_edge_init_data(left)
-    np.testing.assert_(np.all(edge_init_done['right']))
+    np.testing.assertTrue(np.all(edge_init_done['right']))
     topleft = pm.tile_edge.neighbors[esfile]['top-left']
     edge_init_data, edge_init_done, edge_init_todo = pm.tile_edge.get_edge_init_data(topleft)
-    np.testing.assert_(np.any(edge_init_done['right']))
-    np.testing.assert_(np.any(edge_init_done['bottom']))
+    np.testing.assertTrue(np.any(edge_init_done['right']))
+    np.testing.assertTrue(np.any(edge_init_done['bottom']))
     # pm.tile_edge.visualize_neighbors()
 
     # Do the third tile
@@ -103,18 +103,18 @@ if __name__ == "__main__":
     fn, status = pm.calculate_twi(esfile,
                               save_path=pm.save_path, do_edges=False)
     edge_init_data, edge_init_done, edge_init_todo = pm.tile_edge.get_edge_init_data(esfile)
-    np.testing.assert_(np.all(~edge_init_todo['right'][1:-1]))
-    np.testing.assert_(np.all(~edge_init_todo['left'][1:-1]))
-    np.testing.assert_(np.all(~edge_init_todo['top'][1:-1]))
-    np.testing.assert_(np.all(~edge_init_todo['bottom'][1:-1]))
+    np.testing.assertTrue(np.all(~edge_init_todo['right'][1:-1]))
+    np.testing.assertTrue(np.all(~edge_init_todo['left'][1:-1]))
+    np.testing.assertTrue(np.all(~edge_init_todo['top'][1:-1]))
+    np.testing.assertTrue(np.all(~edge_init_todo['bottom'][1:-1]))
     # Next we check that the left and top neighbors are correctly set also
     left = pm.tile_edge.neighbors[esfile]['left']
     edge_init_data, edge_init_done, edge_init_todo = pm.tile_edge.get_edge_init_data(left)
-    np.testing.assert_(np.all(edge_init_done['right']))
+    np.testing.assertTrue(np.all(edge_init_done['right']))
     bottomleft = pm.tile_edge.neighbors[esfile]['bottom-left']
     edge_init_data, edge_init_done, edge_init_todo = pm.tile_edge.get_edge_init_data(bottomleft)
-    np.testing.assert_(np.any(edge_init_done['right']))
-    np.testing.assert_(np.any(edge_init_done['top']))
+    np.testing.assertTrue(np.any(edge_init_done['right']))
+    np.testing.assertTrue(np.any(edge_init_done['top']))
     # pm.tile_edge.visualize_neighbors()
 #    a1 = pm.dem_proc.uca.copy()
 #    esfile = pm.elev_source_files[2]
@@ -135,11 +135,11 @@ if __name__ == "__main__":
                               save_path=pm.save_path, do_edges=False)
 
     edge_init_data, edge_init_done, edge_init_todo = pm.tile_edge.get_edge_init_data(esfile)
-    np.testing.assert_(np.all(~edge_init_todo['right'][1:-1]))
-    np.testing.assert_(np.all(~edge_init_todo['left'][1:-1]))
-    np.testing.assert_(np.all(~edge_init_todo['top'][1:-1]))
-    np.testing.assert_(np.any(~edge_init_todo['bottom'][1:-1]))  # mixed on bottom
-    np.testing.assert_(np.any(edge_init_todo['bottom'][1:-1]))  # mixed on bottom
+    np.testing.assertTrue(np.all(~edge_init_todo['right'][1:-1]))
+    np.testing.assertTrue(np.all(~edge_init_todo['left'][1:-1]))
+    np.testing.assertTrue(np.all(~edge_init_todo['top'][1:-1]))
+    np.testing.assertTrue(np.any(~edge_init_todo['bottom'][1:-1]))  # mixed on bottom
+    np.testing.assertTrue(np.any(edge_init_todo['bottom'][1:-1]))  # mixed on bottom
     # This one has no neighbors to check (no downstream dependencies)
 
 #    a2 = pm.dem_proc.uca.copy()
@@ -153,26 +153,26 @@ if __name__ == "__main__":
     # require edge resolution
     # %%
     i = pm.tile_edge.find_best_candidate(pm.elev_source_files)
-    np.testing.assert_(i==1) # should be the first tile
+    np.testing.assertTrue(i==1) # should be the first tile
     esfile = pm.elev_source_files[i]
 
     fn, status = pm.calculate_twi(esfile,
                               save_path=pm.save_path, do_edges=True)
     edge_init_data, edge_init_done, edge_init_todo = pm.tile_edge.get_edge_init_data(esfile)
-    np.testing.assert_(np.all(~edge_init_todo['right'][1:-1]))
-    np.testing.assert_(np.all(~edge_init_todo['left'][1:-1]))
-    np.testing.assert_(np.all(~edge_init_todo['top'][1:-1]))
-    np.testing.assert_(np.all(~edge_init_todo['bottom'][1:-1]))
+    np.testing.assertTrue(np.all(~edge_init_todo['right'][1:-1]))
+    np.testing.assertTrue(np.all(~edge_init_todo['left'][1:-1]))
+    np.testing.assertTrue(np.all(~edge_init_todo['top'][1:-1]))
+    np.testing.assertTrue(np.all(~edge_init_todo['bottom'][1:-1]))
     # check neihbors
     top = pm.tile_edge.neighbors[esfile]['top']
     edge_init_data, edge_init_done, edge_init_todo = pm.tile_edge.get_edge_init_data(top)
-    np.testing.assert_(np.all(edge_init_done['bottom'][1:-1])) #don't look at corners
+    np.testing.assertTrue(np.all(edge_init_done['bottom'][1:-1])) #don't look at corners
     right = pm.tile_edge.neighbors[esfile]['right']
     edge_init_data, edge_init_done, edge_init_todo = pm.tile_edge.get_edge_init_data(right)
-    np.testing.assert_(np.all(edge_init_done['left'][1:-1])) #don't look at corners
+    np.testing.assertTrue(np.all(edge_init_done['left'][1:-1])) #don't look at corners
 
     i = pm.tile_edge.find_best_candidate(pm.elev_source_files)
-    np.testing.assert_(i==3) # should be the last tile
+    np.testing.assertTrue(i==3) # should be the last tile
     esfile = pm.elev_source_files[i]
     fn, status = pm.calculate_twi(esfile,
                               save_path=pm.save_path, do_edges=True)

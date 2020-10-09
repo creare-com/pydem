@@ -61,14 +61,14 @@ import os
 import traceback
 import subprocess
 import numpy as np
-import cPickle
+import pickle
 import scipy.interpolate as spinterp
 import gc
 
-from reader.gdal_reader import GdalReader
+from .reader.gdal_reader import GdalReader
 
-from dem_processing import DEMProcessor
-from utils import parse_fn, sortrows, get_fn_from_coords
+from .dem_processing import DEMProcessor
+from .utils import parse_fn, sortrows, get_fn_from_coords
 
 
 def find_neighbors(neighbors, coords, I, source_files, f, sides):
@@ -307,7 +307,7 @@ class TileEdgeFile(object):
 
         # Hard part is done. now for convenience, let's find the rest of the
         # neighbors
-        for key in neighbors.keys():
+        for key in list(neighbors.keys()):
             for tb in ['top', 'bottom']:
                 for lr in ['left', 'right']:
                     top_neig = neighbors[key][tb]
@@ -330,13 +330,13 @@ class TileEdgeFile(object):
              'right': EdgeFile(fn, [slice(None), slice(-1, None)], save_path),
              'top': EdgeFile(fn, [slice(0, 1), slice(None)], save_path),
              'bottom': EdgeFile(fn, [slice(-1, None), slice(None)], save_path)}
-            for fn in self.neighbors.keys()}
+            for fn in list(self.neighbors.keys())}
         self.edges = edges
         return edges
 
     def fill_max_elevations(self):
         max_elev = {}
-        for fn in self.edges.keys():
+        for fn in list(self.edges.keys()):
             elev_file = GdalReader(file_name=fn)
             elev, = elev_file.raster_layers
             max_elev[fn] = np.nanmax(elev.raster_data)
@@ -346,12 +346,12 @@ class TileEdgeFile(object):
 
     def fill_percent_done(self):
         percent_done = {}
-        for key, edge in self.edges.iteritems():
-            for key1, ed in edge.iteritems():
+        for key, edge in self.edges.items():
+            for key1, ed in edge.items():
                 ed.update_metrics()
                 # ed.load_metrics()
             percent_done[key] = np.array([edge[key2].percent_done
-                                         for key2 in edge.keys()])
+                                         for key2 in list(edge.keys())])
             percent_done[key] = percent_done[key].sum() \
                 / ((percent_done[key] > 0).sum() + 1e-16)
         self.percent_done = percent_done
@@ -360,9 +360,9 @@ class TileEdgeFile(object):
         if neighbors is None:
             neighbors = self.neighbors
         import matplotlib.pyplot as plt
-        coords = np.array([parse_fn(key) for key in neighbors.keys()])
+        coords = np.array([parse_fn(key) for key in list(neighbors.keys())])
         n_coords = [np.array([parse_fn(neighbors[key][side])
-                    for key in neighbors.keys()])
+                    for key in list(neighbors.keys())])
                     for side in ['left', 'right', 'top', 'bottom',
                     'top-right', 'top-left', 'bottom-right', 'bottom-left']]
 
@@ -379,7 +379,7 @@ class TileEdgeFile(object):
                for n_coord in n_coords]
 
         self.fill_percent_done()
-        colors = np.array([self.percent_done[key] for key in neighbors.keys()])
+        colors = np.array([self.percent_done[key] for key in list(neighbors.keys())])
 
         plt.scatter(x, y, c=colors, s=400, cmap='CMRmap_r')
         plt.clim(0, 100)
@@ -395,7 +395,7 @@ class TileEdgeFile(object):
         plt.xlim(coords[:, left].min(), coords[:, right].max())
         plt.ylim(coords[:, bot].min(), coords[:, top].max())
         count = 0
-        for key, edge in self.edges.iteritems():
+        for key, edge in self.edges.items():
             for side in ['left', 'right', 'top', 'bottom']:
                 ed = edge[side]
                 coordinates = ed.get_coordinates()
@@ -458,12 +458,12 @@ class TileEdgeFile(object):
         if interp is None:
             interp = self.build_interpolator(dem_proc)
         opp = {'top': 'bottom', 'left': 'right'}
-        for key in self.neighbors[elev_fn].keys():
+        for key in list(self.neighbors[elev_fn].keys()):
             tile = self.neighbors[elev_fn][key]
             if tile == '':
                 continue
             oppkey = key
-            for me, neigh in opp.iteritems():
+            for me, neigh in opp.items():
                 if me in key:
                     oppkey = oppkey.replace(me, neigh)
                 else:
@@ -488,7 +488,7 @@ class TileEdgeFile(object):
         """
         Can figure out how to update the todo based on the elev filename
         """
-        for key in self.edges[elev_fn].keys():
+        for key in list(self.edges[elev_fn].keys()):
             self.edges[elev_fn][key].set_data('todo', data=dem_proc.edge_todo)
 
     def update_edges(self, elev_fn, dem_proc):
@@ -506,11 +506,11 @@ class TileEdgeFile(object):
         """
 
         edge_init_data = {key: self.edges[fn][key].get('data') for key in
-                          self.edges[fn].keys()}
+                          list(self.edges[fn].keys())}
         edge_init_done = {key: self.edges[fn][key].get('done') for key in
-                          self.edges[fn].keys()}
+                          list(self.edges[fn].keys())}
         edge_init_todo = {key: self.edges[fn][key].get('todo') for key in
-                          self.edges[fn].keys()}
+                          list(self.edges[fn].keys())}
         return edge_init_data, edge_init_done, edge_init_todo
 
     def find_best_candidate(self, elev_source_files=None):
@@ -521,31 +521,31 @@ class TileEdgeFile(object):
         continues to process tiles.
         """
         self.fill_percent_done()
-        i_b = np.argmax(self.percent_done.values())
-        if self.percent_done.values()[i_b] <= 0:
+        i_b = np.argmax(list(self.percent_done.values()))
+        if list(self.percent_done.values())[i_b] <= 0:
             return None
 
         # check for ties
-        I = np.array(self.percent_done.values()) == \
-            self.percent_done.values()[i_b]
+        I = np.array(list(self.percent_done.values())) == \
+            list(self.percent_done.values())[i_b]
         if I.sum() == 1:
             pass  # no ties
         else:
-            I2 = np.argmax(np.array(self.max_elev.values())[I])
+            I2 = np.argmax(np.array(list(self.max_elev.values()))[I])
             i_b = I.nonzero()[0][I2]
 
             # Make sure the apples are still apples
-            assert(np.array(self.max_elev.keys())[I][I2]
-                   == np.array(self.percent_done.keys())[I][I2])
+            assert(np.array(list(self.max_elev.keys()))[I][I2]
+                   == np.array(list(self.percent_done.keys()))[I][I2])
 
         if elev_source_files is not None:
-            fn = self.percent_done.keys()[i_b]
+            fn = list(self.percent_done.keys())[i_b]
             lckfn = _get_lockfile_name(fn)
             if os.path.exists(lckfn):  # another process is working on it
                 # Find a different Candidate
-                i_alt = np.argsort(self.percent_done.values())[::-1]
+                i_alt = np.argsort(list(self.percent_done.values()))[::-1]
                 for i in i_alt:
-                    fn = self.percent_done.keys()[i]
+                    fn = list(self.percent_done.keys())[i]
                     lckfn = _get_lockfile_name(fn)
                     if not os.path.exists(lckfn):
                         break
@@ -656,7 +656,7 @@ class ProcessManager(object):
                 except:
                     pass
                 traceback.print_exc()
-                print traceback.format_exc()
+                print(traceback.format_exc())
                 if index is None:
                     self.twi_status[i] = "Error " + traceback.format_exc()
                 else:
@@ -676,24 +676,24 @@ class ProcessManager(object):
         """
         # Round 0 of twi processing, process the magnitude and directions of
         # slopes
-        print "Starting slope calculation round"
+        print("Starting slope calculation round")
         self.process_twi(index, do_edges=False, skip_uca_twi=True)
 
         # Round 1 of twi processing
-        print "Starting self-area calculation round"
+        print("Starting self-area calculation round")
         self.process_twi(index, do_edges=False)
 
         # Round 2 of twi processing: edge resolution
         i = self.tile_edge.find_best_candidate(self.elev_source_files)
 
-        print "Starting edge resolution round: ",
+        print("Starting edge resolution round: ", end=' ')
         count = 0
         i_old = -1
         same_count = 0
         while i is not None and same_count < 3:
             count += 1
-            print '*' * 10
-            print count, '(%d -- > %d) .' % (i_old, i)
+            print('*' * 10)
+            print(count, '(%d -- > %d) .' % (i_old, i))
             # %%
             self.process_twi(i, do_edges=True)
             i_old = i
@@ -703,9 +703,9 @@ class ProcessManager(object):
             else:
                 same_count = 0
 
-        print '*'*79
-        print '*******    PROCESSING COMPLETED     *******'
-        print '*'*79
+        print('*'*79)
+        print('*******    PROCESSING COMPLETED     *******')
+        print('*'*79)
         return self
 
     def calculate_twi(self, esfile, save_path, use_cache=True, do_edges=False,
@@ -733,11 +733,11 @@ class ProcessManager(object):
         if os.path.exists(os.path.join(save_path, 'tile_edge.pkl')) and \
                 self.tile_edge is None:
             with open(os.path.join(save_path, 'tile_edge.pkl'), 'r') as fid:
-                self.tile_edge = cPickle.load(fid)
+                self.tile_edge = pickle.load(fid)
         elif self.tile_edge is None:
             self.tile_edge = TileEdgeFile(self.elev_source_files, save_path)
             with open(os.path.join(save_path, 'tile_edge.pkl'), 'wb') as fid:
-                cPickle.dump(self.tile_edge, fid)
+                pickle.dump(self.tile_edge, fid)
 
 
         status = 'Success'  # optimism
@@ -745,14 +745,14 @@ class ProcessManager(object):
         lckfn = _get_lockfile_name(esfile)
         coords = parse_fn(esfile)
         fn = get_fn_from_coords(coords, 'twi')
-        print '*'*79
+        print('*'*79)
         if skip_uca_twi:
-            print '*'*10, fn, 'Slope Calculation starting...:', '*'*10
+            print('*'*10, fn, 'Slope Calculation starting...:', '*'*10)
         else:
-            print '*'*10, fn, 'TWI Calculation starting...:', '*'*10
-        print '*'*79
+            print('*'*10, fn, 'TWI Calculation starting...:', '*'*10)
+        print('*'*79)
         if os.path.exists(lckfn):  # another process is working on it
-            print fn, 'is locked'
+            print(fn, 'is locked')
             return fn, "Locked"
         else:  # lock this tile
             fid = file(lckfn, 'w')
@@ -766,8 +766,8 @@ class ProcessManager(object):
                                    + '.npz') \
                 and os.path.exists(dem_proc.get_full_fn('ang', save_path)
                                    + '.npz'):
-            print dem_proc.get_full_fn('mag', save_path) + '.npz', 'already exists'
-            print dem_proc.get_full_fn('ang', save_path) + '.npz', 'already exists'
+            print(dem_proc.get_full_fn('mag', save_path) + '.npz', 'already exists')
+            print(dem_proc.get_full_fn('ang', save_path) + '.npz', 'already exists')
             # remove lock file
             os.remove(lckfn)
             return fn, 'Cached: Slope'
@@ -775,18 +775,18 @@ class ProcessManager(object):
         # resolution round, we should move on to the next tile
         if os.path.exists(dem_proc.get_full_fn('twi', save_path)) \
                 and (do_edges is False):
-            print dem_proc.get_full_fn('twi', save_path), 'already exists'
+            print(dem_proc.get_full_fn('twi', save_path), 'already exists')
             # remove lock file
             os.remove(lckfn)
             return fn, 'Cached'
 
         # only calculate the slopes and direction if they do not exist in cache
-        fn_ele = dem_proc.get_full_fn('ele', save_path)
+        fn_ele = dem_proc.get_full_fn('elev', save_path)
         fn_ang = dem_proc.get_full_fn('ang', save_path)
         fn_mag = dem_proc.get_full_fn('mag', save_path)
         if (not self.overwrite_cache and
             os.path.exists(fn_ele + '.npz') and
-            os.path.exists(fn_and + '.npz') and
+            os.path.exists(fn_ang + '.npz') and
             os.path.exists(fn_mag + '.npz')):
             dem_proc.load_elevation(fn_ele)
             dem_proc.load_direction(fn_ang)
@@ -874,7 +874,7 @@ class ProcessManager(object):
                    '-compute_edges', '-co',  'BIGTIFF=YES', '-of',
                    'GTiff', '-co', 'compress=lzw', '-co', 'TILED=YES',
                    esfile, fn]
-            print '<'*8, ' '.join(cmd), '>'*8
+            print('<'*8, ' '.join(cmd), '>'*8)
             status = subprocess.call(cmd)
             return status
         self.process_command(command, 'hillshade', index)
@@ -908,13 +908,13 @@ class ProcessManager(object):
                 fn = get_fn_from_coords(coords, save_name)
                 fn = os.path.join(save_root, fn)
                 if os.path.exists(lckfn):  # another process is working on it
-                    print fn, 'is locked'
+                    print(fn, 'is locked')
                     status = 'locked'
                 elif os.path.exists(fn):
-                    print fn, 'already exists'
+                    print(fn, 'already exists')
                     status = 'cached'
                 else:  # lock this tile
-                    print fn, '... calculating ', save_name
+                    print(fn, '... calculating ', save_name)
                     fid = file(lckfn, 'w')
                     fid.close()
 
@@ -934,7 +934,7 @@ class ProcessManager(object):
                 except:
                     pass
                 traceback.print_exc()
-                print traceback.format_exc()
+                print(traceback.format_exc())
                 if index is None:
                     self.custom_status[i] = "Error " + traceback.format_exc()
                 else:

@@ -54,4 +54,4 @@ if __name__ == "__main__":
         os.mkdir('twi')
     dem_proc1.save_twi('.')
     dem_proc2.save_twi('.')
-    print 'done'
+    print('done')
