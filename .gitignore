@@ -5,6 +5,10 @@ pydem/cyfuncs/cyutils.cpp
 *.pyd
 pydem/reader/inpaint.cpp
 
+C:\\temp
+testtiff
+temp.tif
+
 
 # Created by https://www.toptal.com/developers/gitignore/api/python
 # Edit at https://www.toptal.com/developers/gitignore?templates=python
