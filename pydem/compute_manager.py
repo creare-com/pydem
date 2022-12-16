@@ -1136,7 +1136,7 @@ class ProcessManager(tl.HasTraits):
                         
                     
                     
-                    show(True)
+                    show()
                 count += 1
                 print('Count {}'.format(count))
                 s = calc_uca_ec(**kwds[I[0]])
