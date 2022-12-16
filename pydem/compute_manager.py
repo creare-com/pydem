@@ -491,8 +491,8 @@ class ProcessManager(tl.HasTraits):
                 assert grid_lon_size[grid_id[i, 1]] == self.index[i, self._i('ncols')]
 
         # Figure out the slice indices in the zarr array for each elevation file
-        grid_lat_size_cumulative = np.concatenate([[0], grid_lat_size.cumsum()])
-        grid_lon_size_cumulative = np.concatenate([[0], grid_lon_size.cumsum()])
+        grid_lat_size_cumulative = np.concatenate([[0], grid_lat_size.cumsum().astype(int)])
+        grid_lon_size_cumulative = np.concatenate([[0], grid_lon_size.cumsum().astype(int)])
         grid_slice = []
         for i in range(self.n_inputs):
             ii = grid_id[i, 0]
@@ -669,8 +669,8 @@ class ProcessManager(tl.HasTraits):
             ]), axis=0)
 
         # Figure out the slices for the non-overlapping arrays
-        grid_lat_size_cumulative = np.concatenate([[0], self.grid_lat_size_unique.cumsum()])
-        grid_lon_size_cumulative = np.concatenate([[0], self.grid_lon_size_unique.cumsum()])
+        grid_lat_size_cumulative = np.concatenate([[0], self.grid_lat_size_unique.cumsum().astype(int)])
+        grid_lon_size_cumulative = np.concatenate([[0], self.grid_lon_size_unique.cumsum().astype(int)])
         grid_slice = []
         for i in range(self.n_inputs):
             ii = self.grid_id[i, 0]
@@ -1136,7 +1136,7 @@ class ProcessManager(tl.HasTraits):
                         
                     
                     
-                    show(True)
+                    show()
                 count += 1
                 print('Count {}'.format(count))
                 s = calc_uca_ec(**kwds[I[0]])
