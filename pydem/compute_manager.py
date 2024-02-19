@@ -749,10 +749,11 @@ class ProcessManager(tl.HasTraits):
             crs = rasterio.open(self.elev_source_files[0], 'r').crs
             
         # Create the geotransform(s) for the large file
+        decimals_to_round = 14
         lat_check_ids = self.grid_id2i.max(axis=1)
-        dlats = np.unique(self.index[lat_check_ids, self._i('dlat')])
+        dlats = np.unique(np.round(self.index[lat_check_ids, self._i('dlat')], decimals = decimals_to_round))
         lon_check_ids = self.grid_id2i.max(axis=0)
-        dlons = np.unique(self.index[lon_check_ids, self._i('dlon')])
+        dlons = np.unique(np.round(self.index[lon_check_ids, self._i('dlon')], decimals = decimals_to_round))
         if (dlats.size > 1) or (dlons.size > 1):
             raise NotImplementedError
         
@@ -822,14 +823,14 @@ class ProcessManager(tl.HasTraits):
         zf  = self.out_file_noverlap[key]
         
         if crs is None:
-            crs = rasterio.open(self.elev_source_files[0], 'r').crs
-            
-        
+            crs = rasterio.open(self.elev_source_files[0], 'r').crs           
+
         # Create the geotransform(s) for the large file
+        decimals_to_round = 14
         lat_check_ids = self.grid_id2i.max(axis=1)
-        dlats = np.unique(self.index[lat_check_ids, self._i('dlat')])
+        dlats = np.unique(np.round(self.index[lat_check_ids, self._i('dlat')], decimals = decimals_to_round))
         lon_check_ids = self.grid_id2i.max(axis=0)
-        dlons = np.unique(self.index[lon_check_ids, self._i('dlon')])
+        dlons = np.unique(np.round(self.index[lon_check_ids, self._i('dlon')], decimals = decimals_to_round))
         if (dlats.size > 1) or (dlons.size > 1):
             raise NotImplementedError
         
