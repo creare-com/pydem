@@ -191,7 +191,16 @@ def mk_dx_dy_from_geotif_layer(dataset):
         return dX, dY, dX2, dY2
     
     wkt = dataset.crs.to_wkt()
-    ellipsoid = wkt.split('SPHEROID["')[1].split('"')[0].replace(' ', '-')
+    try:
+        ellipsoid = wkt.split('SPHEROID["')[1].split('"')[0].replace(' ', '-')
+    except Exception as e:
+        print(f"No 'SPHEROID' key in wkt: {e}")
+
+    try:
+        ellipsoid = wkt.split('ELLIPSOID["')[1].split('"')[0].replace(' ', '-')
+    except Exception as e:
+        print(f"No 'ELLIPSOID' key in wkt: {e}")
+    
     d = distance(ellipsoid=ellipsoid)
     dx = dataset.transform.a
     lon = dataset.transform.d + dx / 2

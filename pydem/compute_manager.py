@@ -173,8 +173,8 @@ def calc_uca(fn, out_fn_uca, out_fn_todo, out_fn_done, out_fn, out_slice, edge_s
         dp.find_flats()
         dp.calc_uca(plotflag=False)
         save_result(dp.uca.astype(dtype), out_fn_uca, out_slice)
-        save_result(dp.edge_todo.astype(np.bool), out_fn_todo, out_slice, _test_bool)
-        save_result(dp.edge_done.astype(np.bool), out_fn_done, out_slice, _test_bool)
+        save_result(dp.edge_todo.astype(bool), out_fn_todo, out_slice, _test_bool)
+        save_result(dp.edge_done.astype(bool), out_fn_done, out_slice, _test_bool)
     except Exception as e:
         return (0, fn + ':' + traceback.format_exc())
     return (1, "{}: success".format(fn))
@@ -259,8 +259,8 @@ def calc_uca_ec(fn, out_fn_uca, out_fn_uca_edges, out_fn_todo, out_fn_done, out_
                           edge_init_data=[edge_init_data, edge_init_done, edge_init_todo],
                           plotflag=False)
         save_result((dp.uca - uca_init).astype(dtype), out_fn_uca_edges, out_slice)
-        save_result(dp.edge_todo.astype(np.bool), out_fn_todo, out_slice, _test_bool)
-        save_result(dp.edge_done.astype(np.bool), out_fn_done, out_slice, _test_bool)
+        save_result(dp.edge_todo.astype(bool), out_fn_todo, out_slice, _test_bool)
+        save_result(dp.edge_done.astype(bool), out_fn_done, out_slice, _test_bool)
     except Exception as e:
         return (0, fn + ':' + traceback.format_exc(), None)
     return (1, "{}: success".format(fn), uca)
@@ -749,10 +749,11 @@ class ProcessManager(tl.HasTraits):
             crs = rasterio.open(self.elev_source_files[0], 'r').crs
             
         # Create the geotransform(s) for the large file
+        decimals_to_round = 14
         lat_check_ids = self.grid_id2i.max(axis=1)
-        dlats = np.unique(self.index[lat_check_ids, self._i('dlat')])
+        dlats = np.unique(np.round(self.index[lat_check_ids, self._i('dlat')], decimals = decimals_to_round))
         lon_check_ids = self.grid_id2i.max(axis=0)
-        dlons = np.unique(self.index[lon_check_ids, self._i('dlon')])
+        dlons = np.unique(np.round(self.index[lon_check_ids, self._i('dlon')], decimals = decimals_to_round))
         if (dlats.size > 1) or (dlons.size > 1):
             raise NotImplementedError
         
@@ -822,14 +823,14 @@ class ProcessManager(tl.HasTraits):
         zf  = self.out_file_noverlap[key]
         
         if crs is None:
-            crs = rasterio.open(self.elev_source_files[0], 'r').crs
-            
-        
+            crs = rasterio.open(self.elev_source_files[0], 'r').crs           
+
         # Create the geotransform(s) for the large file
+        decimals_to_round = 14
         lat_check_ids = self.grid_id2i.max(axis=1)
-        dlats = np.unique(self.index[lat_check_ids, self._i('dlat')])
+        dlats = np.unique(np.round(self.index[lat_check_ids, self._i('dlat')], decimals = decimals_to_round))
         lon_check_ids = self.grid_id2i.max(axis=0)
-        dlons = np.unique(self.index[lon_check_ids, self._i('dlon')])
+        dlons = np.unique(np.round(self.index[lon_check_ids, self._i('dlon')], decimals = decimals_to_round))
         if (dlats.size > 1) or (dlons.size > 1):
             raise NotImplementedError
         
@@ -976,9 +977,9 @@ class ProcessManager(tl.HasTraits):
         zf = zarr.open(out_uca_edges, shape=self.grid_size_tot, chunks=self.grid_chunk, mode='a',
                 dtype=self.dtype, fill_value=0)
         out_edge_done = os.path.join(self.out_path, 'edge_done')
-        zf1 = zarr.open(out_edge_done, shape=self.grid_size_tot, chunks=self.grid_chunk, mode='a', dtype=np.bool)
+        zf1 = zarr.open(out_edge_done, shape=self.grid_size_tot, chunks=self.grid_chunk, mode='a', dtype=bool)
         out_edge_todo = os.path.join(self.out_path, 'edge_todo')
-        zf2 = zarr.open(out_edge_todo, shape=self.grid_size_tot, chunks=self.grid_chunk, mode='a', dtype=np.bool)
+        zf2 = zarr.open(out_edge_todo, shape=self.grid_size_tot, chunks=self.grid_chunk, mode='a', dtype=bool)
 
         # populate kwds
         kwds = [dict(fn=self.elev_source_files[i],
