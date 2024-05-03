@@ -1,9 +1,4 @@
 # -*- coding: utf-8 -*-
-# NOTES
-# TODO: Clean up filenames -- should be attributes of class
-# TODO: Make a final seamless result with no overlaps -- option to save out to GeoTIFF, and quantize data for cheaper storage
-# TODO: Need to pass along user defined KWARGS
-
 import os
 import traceback
 import subprocess
