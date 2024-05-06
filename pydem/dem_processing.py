@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-   Copyright 2015 Creare
+   Copyright 2015-2024 Creare
 
    Licensed under the Apache License, Version 2.0 (the "License");
    you may not use this file except in compliance with the License.
@@ -62,10 +62,9 @@ import traittypes as tt
 import scipy.sparse as sps
 import scipy.ndimage as spndi
 
-from .taudem import taudem
-from .test_pydem import get_test_data, make_file_names
-from .utils import (mk_dx_dy_from_geotif_layer, get_fn,
-                   make_slice, is_edge, grow_obj, find_centroid, get_distance,
+from .utils_test_pydem import get_test_data, make_file_names
+from .utils import (get_fn,
+                   make_slice, grow_obj, find_centroid, get_distance,
                    get_border_index, get_border_mask, get_adjacent_index,
                    dem_processor_from_raster_kwargs)
 
@@ -200,18 +199,42 @@ class DEMProcessor(tl.HasTraits):
     transform = tl.List()
 
     def __init__(self, elev_fn=None, **kwargs):
+        """ Initialize DemProcessor using an elevation file,
+        or by specifying any of the public attributes directly.
+
+        Parameters
+        -----------
+        elev_fn : str, optional
+            Default is None. If not node, the file contents is read into self.elev,
+            and pydem attempts to extract the grid information is automatically
+        kwargs : dict, optional
+            Dictionary of attributes that change the behavior of DemProcessor
+
+        Examples
+        ----------
+        ```python
+        dp = DemProcessor(ele_fn="my_elevation_file.tiff", fill_flats=False)  # From a file
+        dp = DemProcessor(elev=my_elevation_array, dX=0.1, dY=0.3, drain_pits=False)  # From an in-memory numpy array (elevation_array)
+
+        ```
+
+        Notes
+        -------
+        dX and dY can either be specified as a single float, or an array that matches the (latitude
+        dimension - 1) of the elevation array.
+        """
         if elev_fn:
             kwds = (dem_processor_from_raster_kwargs(elev_fn))
             kwds.update(kwargs)
             kwargs = kwds
-        if not isinstance(kwargs['dX'], np.ndarray):
+        if not isinstance(kwargs.get('dX'), np.ndarray):
             if 'dX2' not in kwargs:
-                kwargs['dX2'] = np.ones(kwargs['elev'].shape[0]) * kwargs['dX']
-            kwargs['dX'] *= np.ones(kwargs['elev'].shape[0] - 1)
-        if not isinstance(kwargs['dY'], np.ndarray):
+                kwargs['dX2'] = np.ones(kwargs['elev'].shape[0]) * kwargs.get('dX', 1)
+            kwargs['dX'] = np.ones(kwargs['elev'].shape[0] - 1) * kwargs.get('dX', 1)
+        if not isinstance(kwargs.get('dY'), np.ndarray):
             if 'dY2' not in kwargs:
-                kwargs['dY2'] = np.ones(kwargs['elev'].shape[0]) * kwargs['dY']
-            kwargs['dY'] *= np.ones(kwargs['elev'].shape[0] - 1)
+                kwargs['dY2'] = np.ones(kwargs['elev'].shape[0]) * kwargs.get('dY', 1)
+            kwargs['dY'] = np.ones(kwargs['elev'].shape[0] - 1) * kwargs.get('dY', 1)
 
         super().__init__(**kwargs)
 
@@ -1682,69 +1705,6 @@ class DEMProcessor(tl.HasTraits):
         quiver(x, y, nx, ny, mat_data.ravel(), angles='xy', scale_units='xy',
                scale=1, cmap='bone')
         colorbar(); clim([0, 1])
-
-    def _plot_debug_slopes_directions(self):
-        """
-        A debug function to plot the direction calculated in various ways.
-        """
-        # %%
-        from matplotlib.pyplot import matshow, colorbar, clim, title
-
-        matshow(self.direction / np.pi * 180); colorbar(); clim(0, 360)
-        title('Direction')
-
-        mag2, direction2 = self._central_slopes_directions()
-        matshow(direction2 / np.pi * 180.0); colorbar(); clim(0, 360)
-        title('Direction (central difference)')
-
-        matshow(self.mag); colorbar()
-        title('Magnitude')
-        matshow(mag2); colorbar(); title("Magnitude (Central difference)")
-
-        # %%
-        # Compare to Taudem
-        filename = self.file_name
-        os.chdir('testtiff')
-        try:
-            os.remove('test_ang.tif')
-            os.remove('test_slp.tif')
-        except:
-            pass
-        cmd = ('dinfflowdir -fel "%s" -ang "%s" -slp "%s"' %
-               (os.path.split(filename)[-1], 'test_ang.tif', 'test_slp.tif'))
-        taudem._run(cmd)
-
-        td_file = GdalReader(file_name='test_ang.tif')
-        td_ang, = td_file.raster_layers
-        td_file2 = GdalReader(file_name='test_slp.tif')
-        td_mag, = td_file2.raster_layers
-        os.chdir('..')
-
-        matshow(td_ang.raster_data / np.pi*180); clim(0, 360); colorbar()
-        title('Taudem direction')
-        matshow(td_mag.raster_data); colorbar()
-        title('Taudem magnitude')
-
-        matshow(self.elev); colorbar()
-        title('The test data (elevation)')
-
-        diff = (td_ang.raster_data - self.direction) / np.pi * 180.0
-        diff[np.abs(diff) > 300] = np.nan
-        matshow(diff); colorbar(); clim([-1, 1])
-        title('Taudem direction - calculated Direction')
-
-        # normalize magnitudes
-        mag2 = td_mag.raster_data
-        mag2 /= np.nanmax(mag2)
-        mag = self.mag.copy()
-        mag /= np.nanmax(mag)
-        matshow(mag - mag2); colorbar()
-        title('Taudem magnitude - calculated magnitude')
-        del td_file
-        del td_file2
-        del td_ang
-        del td_mag
-
 
 def _get_flat_ids(assigned):
     """
