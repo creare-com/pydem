@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-   Copyright 2015 Creare
+   Copyright 2015-2024 Creare
 
    Licensed under the Apache License, Version 2.0 (the "License");
    you may not use this file except in compliance with the License.
@@ -15,9 +15,9 @@
    limitations under the License.
 """
 if __name__ == "__main__":
-    from pydem.test_pydem import get_test_data
+    from pydem.utils_test_pydem import get_test_data
     from pydem.dem_processing import DEMProcessor
-    from pydem.test_pydem import make_file_names
+    from pydem.utils_test_pydem import make_file_names
 
     import sys, os
     if len(sys.argv) <= 1:
@@ -27,31 +27,24 @@ if __name__ == "__main__":
 
     # Get test data and create DEMProcessor
     elev, ang, test_data = get_test_data(testnum, NN)
-    elev = elev.raster_data
-    
-    dem_proc1 = DEMProcessor(elev)
-    # Calculate TWI
+
+    dem_proc1 = DEMProcessor(elev=elev, fill_flats=False)
     twi1 = dem_proc1.calc_twi()
-    
+    dem_proc1b = DEMProcessor(elev=elev, fill_flats=True)
+    twi1b = dem_proc1b.calc_twi()
+    # Calculate TWI
+
     # Stretch the latitude direction
-    lats = [0, 2]  # degrees
-    lons = [0, 1]  # degrees
-    dem_proc2 = DEMProcessor((elev, lats, lons))
+    dem_proc2 = DEMProcessor(elev=elev, dY=2, dX=1)
     twi2 = dem_proc2.calc_twi()
 
     # plot results
     import matplotlib.pyplot as plt
     plt.matshow(twi1); plt.colorbar()
     plt.title('TWI calculated from Array, dx/dy determined from array shape')
-    plt.matshow(dem_proc1.data); plt.colorbar()
+    plt.matshow(twi1b); plt.colorbar()
     plt.title('Elevation from Array (after fixing flats)')
     plt.matshow(twi2); plt.colorbar()
     plt.title('TWI calculated from Array, dx/dy determined from input lat/lon')
-    
+
     plt.show()
-    
-    if not os.path.exists('twi'):
-        os.mkdir('twi')
-    dem_proc1.save_twi('.')
-    dem_proc2.save_twi('.')
-    print 'done'

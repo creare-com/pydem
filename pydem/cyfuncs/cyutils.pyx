@@ -2,6 +2,20 @@
 """
 Created on Tue Nov 04 17:11:16 2014
 
+Copyright 2014-2024 Creare
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+
 @author: mpu
 """
 
@@ -99,7 +113,7 @@ def drain_area(np.ndarray[double, ndim=1] area,
                        &(edge_todo[0]), do_edge_todo,
                        &(edge_todo_no_mask[0]), do_edge_todo_no_mask,
                        skip_edge)
-    return area, done, edge_todo.astype('bool'), edge_todo_no_mask.astype('bool')
+    return area, done, edge_todo, edge_todo_no_mask
 
 
 cdef void _drain_area(double *area, DTYPEb_t* done,
@@ -147,7 +161,7 @@ cdef void _drain_area(double *area, DTYPEb_t* done,
                     continue
 
                 area[row_id] += area[i] * factor
-                
+
                 if do_edge_todo:
                     edge_todo[row_id] += edge_todo[i] * factor
                 if do_edge_todo_no_mask:

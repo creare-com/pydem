@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-   Copyright 2015 Creare
+   Copyright 2015-2024 Creare
 
    Licensed under the Apache License, Version 2.0 (the "License");
    you may not use this file except in compliance with the License.
@@ -16,28 +16,21 @@
 """
 if __name__ == "__main__":
     import os
-    from pydem.processing_manager import ProcessManager
+    from pydem.process_manager import ProcessManager
     path = r'testtiff'
 
     # Make at least one test file
     if len(os.listdir(path)) == 0:
-        from pydem.test_pydem import get_test_data
+        from pydem.utils_test_pydem import get_test_data
         get_test_data(13, 64)
-
-        from pydem.utils import rename_files
-        elev_source_files = [os.path.join(path, fn)
-                                      for fn in os.listdir(path)
-                                      if os.path.splitext(fn)[-1]
-                                      in ['.tif', '.tiff'] and '_elev' in fn]
         other_source_files = [os.path.join(path, fn)
                                       for fn in os.listdir(path)
                                       if os.path.splitext(fn)[-1]
                                       in ['.tif', '.tiff'] and '_elev' not in fn]
-        rename_files(elev_source_files)
         for fil in other_source_files:
             os.remove(fil)
 
     savepath = os.path.join('testtiff', 'processed_data')
-    pm = ProcessManager(path, savepath)
-    #pm._DEBUG = False
-    pm.process()
+    pm = ProcessManager(in_path=path, out_path=savepath)
+    pm.process_twi()
+    pm.save_non_overlap_data(os.path.join('testtiff', 'processed_seamless.zarr')) # as a .zarr

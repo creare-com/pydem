@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-   Copyright 2015 Creare
+   Copyright 2015-2024 Creare
 
    Licensed under the Apache License, Version 2.0 (the "License");
    you may not use this file except in compliance with the License.
@@ -20,10 +20,6 @@ Helper Utilities
 The module supplies helper utility functions that may have some more general
 use.
 
-Usage Notes
-------------
-To rename elevation files to the format required by this package use:
-rename_files function.
 
 Developer Notes
 ----------------
@@ -34,67 +30,50 @@ Created on Tue Oct 14 17:25:50 2014
 """
 from geopy.distance import distance
 import os
-import gdal
-import osr
 import re
-from reader.gdal_reader import GdalReader
 
 import numpy as np
-from scipy.ndimage.filters import minimum_filter
-from scipy.ndimage.measurements import center_of_mass
+from scipy.ndimage import minimum_filter
+from scipy.ndimage import center_of_mass
+import rasterio
 
-def rename_files(files, name=None):
-    """
-    Given a list of file paths for elevation files, this function will rename
-    those files to the format required by the pyDEM package.
+def read_raster(fn):
+    return rasterio.open(fn)
 
-    This assumes a .tif extension.
+def dem_processor_from_raster_kwargs(fn):
+    dataset = read_raster(fn)
+    dx, dy, dx2, dy2 = mk_dx_dy_from_geotif_layer(dataset)
+    elev = dataset.read(1)
+    return dict(dX=dx, dY=dy, elev=elev, bounds=dataset.bounds, transform=dataset.transform,
+                dX2=dx2, dY2=dy2)
 
-    Parameters
-    -----------
-    files : list
-        A list of strings of the paths to the elevation files that will be
-        renamed
-    name : str (optional)
-        Default = None. A suffix to the filename. For example
-        <filename>_suffix.tif
+def mk_transform(lat_top, lon_left, dlat, dlon, lat_lon_centered=False):
+    if lat_lon_centered:
+        lat_top -= dlat / 2  # expect dlat < 0
+        lon_left -= dlon / 2
+    transform = rasterio.transform.Affine.translation(lon_left, lat_top) \
+            * rasterio.transform.Affine.scale(dlon, dlat)
+    return transform
 
-    Notes
-    ------
-    The files are renamed in the same directory as the original file locations
-    """
-    for fil in files:
-        elev_file = GdalReader(file_name=fil)
-        elev, = elev_file.raster_layers
-        fn = get_fn(elev, name)
-        del elev_file
-        del elev
-        fn = os.path.join(os.path.split(fil)[0], fn)
-        os.rename(fil, fn)
-        print "Renamed", fil, "to", fn
+def save_raster(fn, data, crs, transform=None, affine=None):
+    if transform is not None:
+        transform = rasterio.Affine.from_gdal(*transform)
+    elif affine is not None:
+        transform = affine
 
-
-def parse_fn(fn):
-    """ This parses the file name and returns the coordinates of the tile
-
-    Parameters
-    -----------
-    fn : str
-        Filename of a GEOTIFF
-
-    Returns
-    --------
-    coords = [LLC.lat, LLC.lon, URC.lat, URC.lon]
-    """
-    try:
-        parts = os.path.splitext(os.path.split(fn)[-1])[0].replace('o', '.')\
-            .split('_')[:2]
-        coords = [float(crds)
-                  for crds in re.split('[NSEW]', parts[0] + parts[1])[1:]]
-    except:
-        coords = [np.nan] * 4
-    return coords
-
+    kwargs2 = dict(
+        driver="GTiff",
+        height=data.shape[0],
+        width=data.shape[1],
+        count=1,
+        dtype=data.dtype,
+        crs=crs,
+        transform=transform,
+        mode="w",
+    )
+    with rasterio.open(fn, **kwargs2) as dst:
+        r = dst.write(data, 1)
+    return rasterio.open(fn, mode='r')
 
 def get_fn(elev, name=None):
     """
@@ -142,26 +121,54 @@ def get_fn_from_coords(coords, name=None):
     return new_name.replace('.', 'o') + '.tif'
 
 
-def mk_dx_dy_from_geotif_layer(geotif):
+def mk_dx_dy_from_geotif_layer(dataset):
     """
     Extracts the change in x and y coordinates from the geotiff file. Presently
     only supports WGS-84 files.
     """
-    ELLIPSOID_MAP = {'WGS84': 'WGS-84'}
-    ellipsoid = ELLIPSOID_MAP[geotif.grid_coordinates.wkt]
+    if dataset.crs.is_projected:
+        dX = np.ones(dataset.shape[0] - 1) * dataset.transform.a
+        dX2 = np.ones(dataset.shape[0]) * dataset.transform.a
+        dY = np.abs(np.ones(dataset.shape[0] - 1) * dataset.transform.e)
+        dY2 = np.abs(np.ones(dataset.shape[0]) * dataset.transform.e)
+        return dX, dY, dX2, dY2
+
+    wkt = dataset.crs.to_wkt()
+    try:
+        ellipsoid = wkt.split('SPHEROID["')[1].split('"')[0].replace(' ', '-')
+    except Exception as e:
+        print(f"No 'SPHEROID' key in wkt: {e}")
+
+    try:
+        ellipsoid = wkt.split('ELLIPSOID["')[1].split('"')[0].replace(' ', '-')
+    except Exception as e:
+        print(f"No 'ELLIPSOID' key in wkt: {e}")
+
     d = distance(ellipsoid=ellipsoid)
-    dx = geotif.grid_coordinates.x_axis
-    dy = geotif.grid_coordinates.y_axis
-    dX = np.zeros((dy.shape[0]-1))
-    for j in xrange(len(dX)):
-        dX[j] = d.measure((dy[j+1], dx[1]), (dy[j+1], dx[0])) * 1000  # km2m
-    dY = np.zeros((dy.shape[0]-1))
-    for i in xrange(len(dY)):
-        dY[i] = d.measure((dy[i], 0), (dy[i+1], 0)) * 1000  # km2m
-    return dX, dY
+    dx = dataset.transform.a
+    lon = dataset.transform.d + dx / 2
+    dy = dataset.transform.e
+    lat = dataset.transform.f + dy / 2
+    dX = np.zeros((dataset.shape[0] - 1))
+    for j in range(len(dX)):
+        dX[j] = d.measure((np.clip(lat + dy * (j + 1), -90, 90), lon + dx), (np.clip(lat + dy * (j + 1), -90, 90), lon)) * 1000  # km2m
+    dY = np.zeros((dataset.shape[0] - 1))
+    for i in range(len(dY)):
+        dY[i] = d.measure((np.clip(lat + dy * i, -90, 90), lon), (np.clip(lat + dy * (i + 1), -90, 90), lon)) * 1000  # km2m
+
+    lon = dataset.transform.d + dx
+    lat = dataset.transform.f + dy
+    dX2 = np.zeros((dataset.shape[0]))
+    for j in range(len(dX2)):
+        dX2[j] = d.measure((np.clip(lat + dy * (j + 1), -90, 90), lon + dx), (np.clip(lat + dy * (j + 1), -90, 90), lon)) * 1000  # km2m
+    dY2 = np.zeros((dataset.shape[0]))
+    for i in range(len(dY2)):
+        dY2[i] = d.measure((np.clip(lat + dy * i, -90, 90), lon), (np.clip(lat + dy * (i + 1), -90, 90), lon)) * 1000  # km2m
+
+    return dX, dY, dX2, dY2
 
 
-def mk_geotiff_obj(raster, fn, bands=1, gdal_data_type=gdal.GDT_Float32,
+def mk_geotiff_obj(raster, fn, bands=1, gdal_data_type=np.float32,
                    lat=[46, 45], lon=[-73, -72]):
     """
     Creates a new geotiff file objects using the WGS84 coordinate system, saves
@@ -183,16 +190,13 @@ def mk_geotiff_obj(raster, fn, bands=1, gdal_data_type=gdal.GDT_Float32,
         [western lon, eastern lon]
     """
     NNi, NNj = raster.shape
-    driver = gdal.GetDriverByName('GTiff')
-    obj = driver.Create(fn, NNj, NNi, bands, gdal_data_type)
     pixel_height = -np.abs(lat[0] - lat[1]) / (NNi - 1.0)
     pixel_width = np.abs(lon[0] - lon[1]) / (NNj - 1.0)
-    obj.SetGeoTransform([lon[0], pixel_width, 0, lat[0], 0, pixel_height])
-    srs = osr.SpatialReference()
-    srs.SetWellKnownGeogCS('WGS84')
-    obj.SetProjection(srs.ExportToWkt())
-    obj.GetRasterBand(1).WriteArray(raster)
-    return obj, driver
+
+    transform = mk_transform(max(lat), min(lon), pixel_height, pixel_width, lat_lon_centered=True)
+    r = save_raster(fn, data=raster, crs="EPSG:4326", affine=transform)
+
+    return r, transform
 
 
 def sortrows(a, i=0, index_out=False, recurse=True):
@@ -247,7 +251,7 @@ def sortrows(a, i=0, index_out=False, recurse=True):
     if recurse & (len(a[0]) > i + 1):
         for b in np.unique(a[:, i]):
             ids = a[:, i] == b
-            colids = range(i) + range(i+1, len(a[0]))
+            colids = list(range(i)) + list(range(i+1, len(a[0])))
             a[np.ix_(ids, colids)], I2 = sortrows(a[np.ix_(ids, colids)],
                                                   0, True, True)
             I[ids] = I[np.nonzero(ids)[0][I2]]
@@ -281,7 +285,7 @@ def get_adjacent_index(I, shape, size):
     In = I % n
     bL = In != 0
     bR = In != n-1
-    
+
     J = np.concatenate([
         # orthonally adjacent
         I - n,
@@ -348,7 +352,7 @@ def get_border_mask(region):
     internal = region[1:-1, 1:-1]
     if internal.all() and internal.any():
         return ~region
-    
+
     I, = np.where(region.ravel())
     J = get_adjacent_index(I, region.shape, region.size)
 
@@ -411,7 +415,7 @@ def grow_slice(slc, size):
     Returns
     -------
     slc: slice
-       extended slice 
+       extended slice
 
     """
 
@@ -436,33 +440,11 @@ def grow_obj(obj, shape):
 
     return grow_slice(obj[0], shape[0]), grow_slice(obj[1], shape[1])
 
-def is_edge(obj, shape):
-    """
-    Check if a 2d object is on the edge of the array.
-
-    Parameters
-    ----------
-    obj : tuple(slice, slice)
-        Pair of slices (e.g. from scipy.ndimage.measurements.find_objects)
-    shape : tuple(int, int)
-        Array shape.
-
-    Returns
-    -------
-    b : boolean
-        True if the object touches any edge of the array, else False.
-    """
-
-    if obj[0].start == 0: return True
-    if obj[1].start == 0: return True
-    if obj[0].stop == shape[0]: return True
-    if obj[1].stop == shape[1]: return True
-    return False
 
 def find_centroid(region):
     """
     Finds an approximate centroid for a region that is within the region.
-    
+
     Parameters
     ----------
     region : np.ndarray(shape=(m, n), dtype='bool')
@@ -496,7 +478,7 @@ def plot_fill_flat(roi, out, region, source, drain, dL, dH):
         y, x = np.where(region); pyplot.plot(x, y, 'k.')
         y, x = np.where(source); pyplot.plot(x, y, lw=0, color='k', marker='$H$', ms=12)
         y, x = np.where(drain);   pyplot.plot(x, y, lw=0, color='k', marker='$L$', ms=12)
-    
+
     pyplot.subplot(222, sharex=ax, sharey=ax)
     pyplot.axis('off')
     pyplot.title('filled')
@@ -510,7 +492,7 @@ def plot_fill_flat(roi, out, region, source, drain, dL, dH):
     if plot_detail:
         flat = (minimum_filter(out, (3, 3)) >= out) & region
         y, x = np.where(flat); pyplot.plot(x, y, 'r_', ms=24)
-        
+
         pyplot.subplot(223, sharex=ax, sharey=ax)
         pyplot.axis('off')
         pyplot.title('dL')
@@ -535,7 +517,7 @@ def plot_fill_flat(roi, out, region, source, drain, dL, dH):
 
 def plot_drain_pit(self, pit, drain, prop, s, elev, area):
     from matplotlib import pyplot
-    
+
     cmap = 'Greens'
 
     ipit, jpit = np.unravel_index(pit, elev.shape)
@@ -549,7 +531,7 @@ def plot_drain_pit(self, pit, drain, prop, s, elev, area):
     roi = (slice(imin, imax), slice(jmin, jmax))
 
     pyplot.figure()
-    
+
     ax = pyplot.subplot(221);
     pyplot.axis('off')
     im = pyplot.imshow(elev[roi], interpolation='none'); im.set_cmap(cmap)

@@ -1,5 +1,5 @@
 """
-   Copyright 2015 Creare
+   Copyright 2015-2024 Creare
 
    Licensed under the Apache License, Version 2.0 (the "License");
    you may not use this file except in compliance with the License.
@@ -24,11 +24,6 @@ from os import path
 import os
 import numpy as np
 
-# Check for python 3
-import sys
-if not sys.version_info[0] == 2:
-    sys.exit("Sorry, Python 3 is not supported.")
-
 from Cython.Build import cythonize
 
 here = os.path.join(path.dirname(__file__), 'pydem')
@@ -52,12 +47,6 @@ extensions = [
               library_dirs=[],
               extra_compile_args=compile_args,
               language='c++'),
-    Extension("pydem.reader.inpaint",
-              [path_reader + sep + "inpaint.pyx"],
-              include_dirs=[np.get_include()],
-              library_dirs=[],
-              extra_compile_args=compile_args,
-              language='c++'),
 ]
 
 setup(
@@ -65,7 +54,7 @@ setup(
 
     name='pyDEM',
 
-    version='0.2.0',
+    version='1.0.0',
 
     description="Software for calculating Topographic Wetness Index (TWI)",
     author='MPU, RXC, JXM',
@@ -78,7 +67,7 @@ setup(
         # 3 - Alpha
         # 4 - Beta
         # 5 - Production/Stable
-        'Development Status :: 3 - Alpha',
+        'Development Status :: 3 - Beta',
         # Indicate who your project is intended for
         'Intended Audience :: Developers',
         'Topic :: Scientific/Engineering :: GIS',
@@ -86,18 +75,21 @@ setup(
          'License :: OSI Approved :: Apache Software License',
         # Specify the Python versions you support here. In particular, ensure
         # that you indicate whether you support Python 2, Python 3 or both.
-        'Programming Language :: Python :: 2.7',
+        'Programming Language :: Python :: 3',
     ],
     packages=find_packages(),
 
-    python_requires='<3',
+    python_requires='>=3',
 
     install_requires=[
-        #'gdal',
+        'rasterio',
         'numpy',
         'scipy',
         'geopy',
-        'traits',
+        'traitlets',
+        'traittypes',
+        'zarr',
+        'cython'
         ],
 
     entry_points = {
