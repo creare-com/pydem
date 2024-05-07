@@ -1,5 +1,5 @@
 """
-   Copyright 2015 Creare
+   Copyright 2015-2024 Creare
 
    Licensed under the Apache License, Version 2.0 (the "License");
    you may not use this file except in compliance with the License.
@@ -54,7 +54,7 @@ setup(
 
     name='pyDEM',
 
-    version='0.4.0',
+    version='1.0.0',
 
     description="Software for calculating Topographic Wetness Index (TWI)",
     author='MPU, RXC, JXM',
@@ -67,7 +67,7 @@ setup(
         # 3 - Alpha
         # 4 - Beta
         # 5 - Production/Stable
-        'Development Status :: 3 - Alpha',
+        'Development Status :: 3 - Beta',
         # Indicate who your project is intended for
         'Intended Audience :: Developers',
         'Topic :: Scientific/Engineering :: GIS',

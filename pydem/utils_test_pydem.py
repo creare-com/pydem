@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-   Copyright 2015 Creare
+   Copyright 2015-2024 Creare
 
    Licensed under the Apache License, Version 2.0 (the "License");
    you may not use this file except in compliance with the License.
@@ -23,9 +23,8 @@ NOTE: x = lat, y = lon -- THIS IS REVERSED FROM THE USUAL IDEA
 import os
 
 import numpy as np
-from scipy.ndimage.filters import gaussian_filter
+from scipy.ndimage import gaussian_filter
 
-from .taudem import taudem
 from .utils import mk_geotiff_obj, mk_dx_dy_from_geotif_layer, get_fn_from_coords, save_raster, read_raster
 PLOT_TESTCASES = True
 
@@ -420,7 +419,7 @@ def make_test_files(NN=32, plotflag=False, testdir='testtiff', testnum=None):
         N = np.max(NN)
     else:
         N = NN
-    x, y = np.mgrid[-1:1:np.complex(0, N), -1:1:np.complex(0, N)]
+    x, y = np.mgrid[-1:1:complex(0, N), -1:1:complex(0, N)]
     lat, lon = mk_xy_latlon(N)
 
     # The first brace it just to avoid the line-continuouation character

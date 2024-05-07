@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-   Copyright 2015 Creare
+   Copyright 2015-2024 Creare
 
    Licensed under the Apache License, Version 2.0 (the "License");
    you may not use this file except in compliance with the License.
@@ -62,10 +62,9 @@ import traittypes as tt
 import scipy.sparse as sps
 import scipy.ndimage as spndi
 
-from .taudem import taudem
-from .test_pydem import get_test_data, make_file_names
-from .utils import (mk_dx_dy_from_geotif_layer, get_fn,
-                   make_slice, is_edge, grow_obj, find_centroid, get_distance,
+from .utils_test_pydem import get_test_data, make_file_names
+from .utils import (get_fn,
+                   make_slice, grow_obj, find_centroid, get_distance,
                    get_border_index, get_border_mask, get_adjacent_index,
                    dem_processor_from_raster_kwargs)
 
@@ -138,7 +137,7 @@ class DEMProcessor(tl.HasTraits):
     done = tl.Instance(np.ndarray, None)  # Marks if edges are done
 
     plotflag = tl.Bool(False)  # Debug plots
-    
+
     flats = tl.Instance(np.ndarray, None)  # Boolean array indicating location of flats
 
     uca_saturation_limit = tl.Float(32)  # units of area
@@ -161,10 +160,10 @@ class DEMProcessor(tl.HasTraits):
     #       /  |  \
     #  1,-1   1,0   1,1
     #
-    #       [2] [1] 
+    #       [2] [1]
     #        \ |  /
     #    [3]  \|/  [0]
-    #      --     -- 
+    #      --     --
     #    [4]  /|\  [7]
     #       /  |  \
     #       [5] [6]
@@ -188,33 +187,55 @@ class DEMProcessor(tl.HasTraits):
                        [3, -1],
                        [3, 1],
                        [4, -1]
-                       ])    
+                       ])
 
     dX = tt.Array(None, allow_none=True)  # delta x on 'fence' grid
     dY = tt.Array(None, allow_none=True)  # delta y on 'fence' grid
     dX2 = tt.Array(None, allow_none=True)  # delta x on 'post' grid
     dY2 = tt.Array(None, allow_none=True)  # delta y on 'post' grid
-    
-    
+
+
     bounds = tl.List()
     transform = tl.List()
 
     def __init__(self, elev_fn=None, **kwargs):
+        """ Initialize DemProcessor using an elevation file,
+        or by specifying any of the public attributes directly.
+
+        Parameters
+        -----------
+        elev_fn : str, optional
+            Default is None. If not node, the file contents is read into self.elev,
+            and pydem attempts to extract the grid information is automatically
+        kwargs : dict, optional
+            Dictionary of attributes that change the behavior of DemProcessor
+
+        Examples
+        ----------
+        ```python
+        dp = DemProcessor(ele_fn="my_elevation_file.tiff", fill_flats=False)  # From a file
+        dp = DemProcessor(elev=my_elevation_array, dX=0.1, dY=0.3, drain_pits=False)  # From an in-memory numpy array (elevation_array)
+
+        ```
+
+        Notes
+        -------
+        dX and dY can either be specified as a single float, or an array that matches the (latitude
+        dimension - 1) of the elevation array.
+        """
         if elev_fn:
             kwds = (dem_processor_from_raster_kwargs(elev_fn))
             kwds.update(kwargs)
             kwargs = kwds
-        if not isinstance(kwargs['dX'], np.ndarray):
+        if not isinstance(kwargs.get('dX'), np.ndarray):
             if 'dX2' not in kwargs:
-                kwargs['dX2'] = np.ones(kwargs['elev'].shape[0]) * kwargs['dX']
-            kwargs['dX'] *= np.ones(kwargs['elev'].shape[0] - 1)
-        if not isinstance(kwargs['dY'], np.ndarray):
+                kwargs['dX2'] = np.ones(kwargs['elev'].shape[0]) * kwargs.get('dX', 1)
+            kwargs['dX'] = np.ones(kwargs['elev'].shape[0] - 1) * kwargs.get('dX', 1)
+        if not isinstance(kwargs.get('dY'), np.ndarray):
             if 'dY2' not in kwargs:
-                kwargs['dY2'] = np.ones(kwargs['elev'].shape[0]) * kwargs['dY']
-            kwargs['dY'] *= np.ones(kwargs['elev'].shape[0] - 1)
-        
-            
-        
+                kwargs['dY2'] = np.ones(kwargs['elev'].shape[0]) * kwargs.get('dY', 1)
+            kwargs['dY'] = np.ones(kwargs['elev'].shape[0] - 1) * kwargs.get('dY', 1)
+
         super().__init__(**kwargs)
 
     @tl.default('dX')
@@ -224,14 +245,14 @@ class DEMProcessor(tl.HasTraits):
     @tl.default('dY')
     def _default_dY(self):
         return np.ones(self.elev.shape[0] - 1)  # / self.elev.shape[0]
-    
+
     @tl.default('dX2')
     def _default_dX2(self):
         return np.ones(self.elev.shape[0])  # / self.elev.shape[1]  # dX only changes in latitude
 
     @tl.default('dY2')
     def _default_dY2(self):
-        return np.ones(self.elev.shape[0])  # / self.elev.shape[0]    
+        return np.ones(self.elev.shape[0])  # / self.elev.shape[0]
 
     def get_fn(self, name=None):
         return get_fn(self.elev, name)
@@ -415,7 +436,7 @@ class DEMProcessor(tl.HasTraits):
         pit_j = []
         pit_prop = []
         warn_pits = []
-        
+
         if self.fill_flats_below_sea: sea_mask = e != 0
         else: sea_mask = e > 0
         footprint = np.ones((3, 3), dtype=bool)
@@ -439,16 +460,16 @@ class DEMProcessor(tl.HasTraits):
                 eborder = e[border]
                 if eborder.size == 0:
                     break
-                
+
                 emin = eborder.min()
                 eminI = eborder == emin
                 if emin < epit:
                     drain = border[eminI]
                     break
-                
+
                 path += border[eminI].tolist()
                 pit_area = np.concatenate([pit_area, border[eminI]])
-            
+
             if drain is None:
                 warn_pits.append(pit)
                 continue
@@ -506,11 +527,11 @@ class DEMProcessor(tl.HasTraits):
                     nexti = min(nexti, len(path) - 2)
                 if path[nexti] == pit:
                     break
-            
+
             # Update the elevation so that the elevation decreases from pit to drain
             if e[pit] < e[drain]:
                 e[pit] = e[path][e[path] > e[drain]].min()
-                
+
             si = e[drain] - e[pit]
             e[path] = e[pit] + np.linspace(0, 1, len(path) ) * si
 
@@ -569,7 +590,7 @@ class DEMProcessor(tl.HasTraits):
         if self.fill_flats:
             print ("Conditioning Elevation: Filling Flats...")
             self.calc_fill_flats()
-            
+
         if self.drain_pits_path:
             print ("Conditioning Elevation: Draining pits along min elevation path...")
             self.calc_pit_drain_paths()
@@ -729,7 +750,7 @@ class DEMProcessor(tl.HasTraits):
             self.edge_done = res[2]
             self.uca = res[0]
             # Fix the very last pixel on the edges
-            #self.uca = self.fix_edge_pixels(edge_data, edge_init_done, edge_init_todo, self.uca)            
+            #self.uca = self.fix_edge_pixels(edge_data, edge_init_done, edge_init_todo, self.uca)
         else:
             print("Starting edge resolution round: ", end='')
             # last return value will be None: edge_
@@ -769,12 +790,12 @@ class DEMProcessor(tl.HasTraits):
         C = A.tocsr()
 
         ids = np.zeros(data.shape, bool)
-        
+
         # Initialize starting ids
         ids = edge_done & edge_todo
         edge_todo = edge_todo & ~edge_done
-        edge_todo_tile = None        
-        
+        edge_todo_tile = None
+
         area = np.zeros(data.shape, 'float64')
         # We need to remove self-area because we already added that contribution to the UCA computation
         # Set the ids to the edges that are now done, and initialize the
@@ -795,13 +816,13 @@ class DEMProcessor(tl.HasTraits):
 
         done = np.ones(data.shape, bool)
         done.ravel()[ids] = False
-        
+
         a = cyutils.drain_connections(
             done.ravel(), ids, B.indptr, B.indices, set_to=False)
         done = a.reshape(done.shape).astype(bool)
 
         done[np.isnan(data)] = True  # deal with no-data values
-        
+
         # Set all the edges to "done". This ensures that another edges does not stop
         # the propagation of data
         done.ravel()[ids0] = True
@@ -830,11 +851,11 @@ class DEMProcessor(tl.HasTraits):
 
         area[flats] = np.nan
         edge_done = ~edge_todo
-        
+
         if plotflag:
             self._plot_connectivity(A, (done.astype('float64') is False)
-                                    + flats.astype('float64') * 2, [0, 3])        
-        
+                                    + flats.astype('float64') * 2, [0, 3])
+
         return area, edge_todo_i, edge_done, edge_todo_tile
 
     def _calc_uca_chunk(self, data, dX, dY, direction, mag, flats,
@@ -861,7 +882,7 @@ class DEMProcessor(tl.HasTraits):
         area = (self.dX2 * self.dY2).reshape(data.shape[0], 1)
         #area = (self.dX * self.dY)
         #area = np.concatenate((area[0:1], area)).reshape(area.size+1, 1)
-        
+
         #area = ((dX[1:] + dX[:-1]) / 2 * (dY[1:] + dY[:-1]) / 2)
         #dX0 = (dX[0] - (dX[1] - dX[0]) + dX[0]) / 2
         #dX0 = (3 * dX[0] - dX[1]) / 2
@@ -873,7 +894,7 @@ class DEMProcessor(tl.HasTraits):
         # Record minimum area
         min_area = np.nanmin(area)
         self.twi_min_area = min(self.twi_min_area, min_area)
-        
+
         area = area.repeat(data.shape[1], 1)
 
         done = np.zeros(data.shape, bool)
@@ -893,9 +914,9 @@ class DEMProcessor(tl.HasTraits):
         edge_todo[0, :] = (A[:, ids_ed[0, :]].sum(0) > TOL) & np.isin(section[0, :], [4, 5, 6, 7])
         # bottom
         edge_todo[-1, :] = (A[:, ids_ed[-1, :]].sum(0) > TOL) & np.isin(section[-1, :], [0, 1, 2, 3])
-        # The corners in a single-overlap situation can acts as a 'passthrough' for data. In that case nothing in the 
+        # The corners in a single-overlap situation can acts as a 'passthrough' for data. In that case nothing in the
         # tile drains into it, and nothing drains out of it. For the sake of everything working, we need to
-        # mark this as a todo edge. This explains the second | below. 
+        # mark this as a todo edge. This explains the second | below.
         # top-left
         edge_todo[0, 0] |= (A[:, ids_ed[0, 0]].sum(0) > TOL) | (A[ids_ed[0, 0], :].sum(1) < TOL)
         # top-right
@@ -1091,14 +1112,14 @@ class DEMProcessor(tl.HasTraits):
             j = np.concatenate([j.ravel(), flat_j]).astype('int64')
             i = np.concatenate([i.ravel(), flat_j]).astype('int64')
             mat_data = np.concatenate([mat_data.ravel(), flat_prop])
-        
+
         elif self.drain_pits_spill:
             pit_i, pit_j, pit_prop, flats, mag = \
                 self._mk_connectivity_pits_spill(i12, flats, elev, mag, dX, dY, i, j)
 
             j = np.concatenate([j.ravel(), pit_j]).astype('int64')
             i = np.concatenate([i.ravel(), pit_i]).astype('int64')
-            mat_data = np.concatenate([mat_data.ravel(), pit_prop])            
+            mat_data = np.concatenate([mat_data.ravel(), pit_prop])
 
         # This prevents no-data values, remove connections when not present,
         # and makes sure that floating point precision errors do not
@@ -1137,12 +1158,12 @@ class DEMProcessor(tl.HasTraits):
         drain to either 1 or two neighbors.
         """
         #              ^ ^  ^^
-        #             \ \|  |/ 
+        #             \ \|  |/
         #            <-3 2 1 /
-        #            <-4   0 ->   
-        #             /5 6 7 -> 
+        #            <-4   0 ->
+        #             /5 6 7 ->
         #             /| |\ \
-        #        
+        #
         shp = np.array(section.shape) - 1
 
         facets = self.facets
@@ -1280,14 +1301,14 @@ class DEMProcessor(tl.HasTraits):
                 eborder = e[border]
                 if eborder.size == 0:
                     break
-                
+
                 emin = eborder.min()
                 # Separate out pits
                 ids = pits_bool.ravel()[border]
                 eborder_pits = eborder[ids]
                 eborder_nopits = eborder[~ids]
                 if eborder_nopits.size > 0:
-                     
+
                     if eborder_nopits.min() < epit_border:
                         drain = border[~ids][eborder_nopits < epit_border]
                         break
@@ -1295,7 +1316,7 @@ class DEMProcessor(tl.HasTraits):
                     if eborder_pits.min() < epit:
                         drain = border[ids][eborder_pits < epit]
                         break
-                
+
                 path += border[eborder == emin].tolist()
                 pit_area = np.concatenate([pit_area, border[eborder == emin]])
                 #path += border.tolist()
@@ -1357,7 +1378,7 @@ class DEMProcessor(tl.HasTraits):
                 np.array(pit_prop, 'float64'),
                 flats,
                 mag)
-    
+
     def _mk_connectivity_pits_spill(self, i12, flats, elev, mag, dX, dY, i, j):
         """
         Helper function for _mk_adjacency_matrix. This is a more general
@@ -1386,16 +1407,16 @@ class DEMProcessor(tl.HasTraits):
             #if inside_pit:
                 ## Then drain to the existing pit
                 ##drain = np.array([pits[I[pits_border[pit] - 1]]])
-                
+
                 ##pit_i += [pit for i in drain]
                 ##pit_j += drain.tolist()
                 ##pit_prop.extend([1] * drain.size)
-                
+
                 ### update pit magnitude and flats mask
                 ##mag[ipit, jpit] = np.abs(np.mean(s))
-                ##flats[ipit, jpit] = False                
+                ##flats[ipit, jpit] = False
                 #continue
-            
+
             pits_border[pit] = pi + 1
             test.ravel()[pit] = 1
             drain = np.array([], np.int64)
@@ -1411,13 +1432,13 @@ class DEMProcessor(tl.HasTraits):
                 # Check to see if any border point does not drain into the old_border
                 drains1 = j.ravel()[border]
                 drains2 = j.ravel()[border + max_ind]
-                
+
                 a_spill = ((pits_border[drains1] <= inside_pit * pi) & (drains1 >= 0)) \
                         | ((pits_border[drains2] <= inside_pit * pi) & (drains2 >= 0))
 
                 drain = border[a_spill]  # Save all the drains
                 pits_border[drain] = inside_pit * pi
-                
+
                 border = border[~a_spill]
                 #if (inside_pit and np.any(a_spill)) or np.all(a_spill) or len(border) == 0:
                 if np.all(a_spill) or len(border) == 0:
@@ -1427,7 +1448,7 @@ class DEMProcessor(tl.HasTraits):
             if len(drain) == 0:
                 warn_pits.append(pit)
                 continue
-            
+
             ipit, jpit = np.unravel_index(pit, elev.shape)
             Idrain, Jdrain = np.unravel_index(drain, elev.shape)
 
@@ -1449,7 +1470,7 @@ class DEMProcessor(tl.HasTraits):
                   for idrain, jdrain in zip(Idrain, Jdrain)]
             dy = [dY[make_slice(ipit, idrain)].sum() for idrain in Idrain]
             dxy = np.sqrt(np.array(dx)**2 + np.array(dy)**2)
-            
+
             if self.drain_pits_max_dist_XY:
                 b = dxy <= self.drain_pits_max_dist_XY
                 if not b.any():
@@ -1468,7 +1489,7 @@ class DEMProcessor(tl.HasTraits):
             pit_i += [pit for i in drain]
             pit_j += drain.tolist()
             pit_prop.extend([1] * drain.size)
-            
+
             # update pit magnitude and flats mask
             mag[ipit, jpit] = np.abs(np.mean(s))
             flats[ipit, jpit] = False
@@ -1684,69 +1705,6 @@ class DEMProcessor(tl.HasTraits):
         quiver(x, y, nx, ny, mat_data.ravel(), angles='xy', scale_units='xy',
                scale=1, cmap='bone')
         colorbar(); clim([0, 1])
-
-    def _plot_debug_slopes_directions(self):
-        """
-        A debug function to plot the direction calculated in various ways.
-        """
-        # %%
-        from matplotlib.pyplot import matshow, colorbar, clim, title
-
-        matshow(self.direction / np.pi * 180); colorbar(); clim(0, 360)
-        title('Direction')
-
-        mag2, direction2 = self._central_slopes_directions()
-        matshow(direction2 / np.pi * 180.0); colorbar(); clim(0, 360)
-        title('Direction (central difference)')
-
-        matshow(self.mag); colorbar()
-        title('Magnitude')
-        matshow(mag2); colorbar(); title("Magnitude (Central difference)")
-
-        # %%
-        # Compare to Taudem
-        filename = self.file_name
-        os.chdir('testtiff')
-        try:
-            os.remove('test_ang.tif')
-            os.remove('test_slp.tif')
-        except:
-            pass
-        cmd = ('dinfflowdir -fel "%s" -ang "%s" -slp "%s"' %
-               (os.path.split(filename)[-1], 'test_ang.tif', 'test_slp.tif'))
-        taudem._run(cmd)
-
-        td_file = GdalReader(file_name='test_ang.tif')
-        td_ang, = td_file.raster_layers
-        td_file2 = GdalReader(file_name='test_slp.tif')
-        td_mag, = td_file2.raster_layers
-        os.chdir('..')
-
-        matshow(td_ang.raster_data / np.pi*180); clim(0, 360); colorbar()
-        title('Taudem direction')
-        matshow(td_mag.raster_data); colorbar()
-        title('Taudem magnitude')
-
-        matshow(self.elev); colorbar()
-        title('The test data (elevation)')
-
-        diff = (td_ang.raster_data - self.direction) / np.pi * 180.0
-        diff[np.abs(diff) > 300] = np.nan
-        matshow(diff); colorbar(); clim([-1, 1])
-        title('Taudem direction - calculated Direction')
-
-        # normalize magnitudes
-        mag2 = td_mag.raster_data
-        mag2 /= np.nanmax(mag2)
-        mag = self.mag.copy()
-        mag /= np.nanmax(mag)
-        matshow(mag - mag2); colorbar()
-        title('Taudem magnitude - calculated magnitude')
-        del td_file
-        del td_file2
-        del td_ang
-        del td_mag
-
 
 def _get_flat_ids(assigned):
     """
@@ -1985,7 +1943,7 @@ def _calc_direction(data, mag, direction, ang, d1, d2, theta,
     This function gives the magnitude and direction of the slope based on
     Tarboton's D_\\infty method. This is a helper-function to
     _tarboton_slopes_directions
-    
+
     slc0 is the point where the slope is being determined
     slc1 is a slice of the data giving the 'd1' direction
     slc2 is a slice of the data giving the 'd2' dirction
