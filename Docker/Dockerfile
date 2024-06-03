@@ -4,10 +4,9 @@ USER root
 
 # Set the working directory in the container
 WORKDIR /app
-
-# Install pyDEM and dependencies
+# copy python dependencies file
+COPY requirements.txt ./
+# install dependencies
 RUN pip install --no-cache-dir -r ./requirements.txt 
-# Install Ipython
+# install ipython
 RUN pip install ipython
-
-
