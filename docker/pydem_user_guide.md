@@ -1,6 +1,6 @@
 # pyDEM Terrain Data Processing User Guide
 
-This document provides instructions on how to set up a Docker container with pyDEM and process your own terrain data. By following this guide, you should end up with a directory containing a `results.zarr` directory and 5 GeoTIFF files: `twi.tiff`, `uca.tiff`, `slope.tiff`, `aspect.tiff`, and `elev.tiff`.
+This document provides instructions on how to set up a Docker container with pyDEM and process your own terrain data to create a Digital Elevation Model. By following this guide, you should end up with a directory containing a `results.zarr` directory and 5 GeoTIFF files: `twi.tiff`, `uca.tiff`, `slope.tiff`, `aspect.tiff`, and `elev.tiff`.
 
 ## Setup
 
@@ -8,7 +8,7 @@ This document provides instructions on how to set up a Docker container with pyD
    - Download `pydem.zip` and unzip the folder into a directory where your unprocessed terrain data lives.
 
 2. **Build the Docker Image**
-   - To set up the pyDEM container, build the Docker image using the Dockerfile. Run the following command in the command line:
+   - To set up the pyDEM container, build the Docker image using the Dockerfile. Change directories to /pydem/docker. Run the following command in the command line:
      ```sh
      docker build -t pydem_app .
      ```
@@ -36,12 +36,14 @@ This document provides instructions on how to set up a Docker container with pyD
 ## Running pyDEM
 
 1. **Run pyDEM with Default Settings**
-   - Once your container is running and your terrain data is mounted, you can begin processing the data with the following example code:
+   - Once your container is running and your terrain data is mounted, create an output directory such as `/app/output_directory`. Use `mkdir /app/output_directory` to create this new directory.
+    - **Warning:** Once you run pyDEM, a `results.zarr` directory will be created in your output directory regardless of pyDEM successfully or unsuccesfully processing the your data. Remove `results.zarr` between runs. If pyDEM sees a `results.zarr` directory in your input directory, it will use the data in this directory and create a duplicate even if you change the data files. To avoid this, choose an output directory that is not in the directory with your source data like `/app/output_directory`. 
+   - You can begin processing the data with the following example code:
      ```python
      from pydem import process_manager
 
-     path = '/path/to/my/data'
-     output_path = '/path/to/output/data'
+     path = '/app/data'
+     output_path = '/app/output_directory'
 
      pm = process_manager.ProcessManager(n_workers=10, in_path=path)
      pm.process_twi()
@@ -55,7 +57,7 @@ This document provides instructions on how to set up a Docker container with pyD
    - The default settings for pyDEM are set for 30m terrain data. For higher resolution data, you may need to change these settings to fill flats and drain pits (these lead to nan values).
 
 3. **Customizing DEM Processor Settings**
-   - The DEM processor is the class in the pyDEM package that controls how terrain data is calculated.
+   - The DEM processor is the class in the pyDEM package that controls how the Digital Elevation Model (DEM) data is calculated.
    - The default settings of the DEM processor are set for 30m resolution elevation data and should work for resolutions higher than 30m
    - If your data has a higher resolution than 30m, you should consider changing the following settings:
      - `drain_pits_max_iter`
@@ -81,8 +83,8 @@ This document provides instructions on how to set up a Docker container with pyD
      ```python
      from pydem import process_manager
 
-     path = '/path/to/my/data'
-     output_path = '/path/to/output/data'
+     path = '/app/data'
+     output_path = '/app/output_directory'
      DEM_processor_settings = { 
          "drain_pits_max_iter": 1000, 
          "drain_pits_max_dist": 100
