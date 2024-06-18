@@ -27,7 +27,7 @@ pm.save_non_overlap_data_geotiff('float32', new_path=output_path, overview_type=
 This code will process all geotiffs in the directory that you specify and return these files: `twi.tiff`, `uca.tiff`,`slope.tiff`,`aspect.tiff`, `elev.tiff`, and `results.zarr`
 * Changing the `n_workers` argument will adjust the resources pyDEM uses as well as change the runtime 
 * The default settings for pyDEM were set for 30m terrain data. If your data has a higher resolution you will likely want to change these settings to fill flats and drain pits (these lead to nan values)
-* The all of the settings for the DEM processor and their descriptions can be found in the `pyDEM README.md`. Most of these settings do not need to be touched. The settings you should tweak are as follows:
+* All of the settings for the DEM processor and their descriptions can be found in the `pyDEM README.md`. Most of these settings do not need to be touched. The settings you should tweak are as follows:
   - `drain_pits_max_iter`
   - `drain_pits_max_dist`
 * These settings need to be increased for data with more pixels and higher resolution. Increasing the values for these settings will result in longer runtimes, but better results with less nan values. It is recommended to increase these values until the results become steady i.e. the twi does not change as you increase these values. 
