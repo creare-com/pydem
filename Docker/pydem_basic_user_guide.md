@@ -5,8 +5,6 @@ In this document are instructions on how to setup a docker container with pyDEM 
 * Download the pyDEM repository `pydem.zip` and unzip the folder into a directory where your unprocessed terrain data lives
 
 * To setup the pyDEM container, we will need to build the image using the Dockerfile. Build the docker file using this command in the command line: `docker build -t pydem_app .`
-  * If you do not have an Ironbank account, the docker build command will fail. Go into the Dockerfile and comment the first line that starts with "FROM". Uncomment this line `FROM python:3.10-slim` and try again.
-
 * A Docker image should now be created called pyDEM_app. It will have pyDEM installed as well as ipython. 
 
 ## Creating a Container
