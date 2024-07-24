@@ -5,10 +5,10 @@ This document provides instructions on how to set up a Docker container with pyD
 ## Setup
 
 1. **Download the pyDEM Repository**
-   - Download `pydem.zip` and unzip the folder into a directory where your unprocessed terrain data lives.
+   - Download `Dockerfile` file, which defines the Docker image, to `folder-location/`, where "folder-location" is a folder name of your choice.
 
 2. **Build the Docker Image**
-   - To set up the pyDEM container, build the Docker image using the Dockerfile. Change directories to /pydem/docker. Run the following command in the command line:
+   - To set up the pyDEM container, build the Docker image using the Dockerfile. Change directories to `folder-location/` (from above). Run the following command in the command line:
      ```sh
      docker build -t pydem_app .
      ```
@@ -30,14 +30,14 @@ This document provides instructions on how to set up a Docker container with pyD
      ```sh
      docker run -it --rm -v /path/to/your/data:/app/data pydem_app:latest bash
      ```
-   - Your data directory should now be live-mounted into the container. Any changes made to your data directory will be reflected both in your file system and in the container. 
+   - Your data directory should now be live-mounted into the container. Any changes made to your data directory will be reflected both in your file system and in the container.
    - Check file permissions if you encounter issues with accessing your data or writing data.
 
 ## Running pyDEM
 
 1. **Run pyDEM with Default Settings**
    - Once your container is running and your terrain data is mounted, create an output directory such as `/app/output_directory`. Use `mkdir /app/output_directory` to create this new directory.
-    - **Warning:** Once you run pyDEM, a `results.zarr` directory will be created in your output directory regardless of pyDEM successfully or unsuccesfully processing the your data. Remove `results.zarr` between runs. If pyDEM sees a `results.zarr` directory in your input directory, it will use the data in this directory and create a duplicate even if you change the data files. To avoid this, choose an output directory that is not in the directory with your source data like `/app/output_directory`. 
+    - **Warning:** Once you run pyDEM, a `results.zarr` directory will be created in your output directory regardless of pyDEM successfully or unsuccesfully processing the your data. Remove `results.zarr` between runs. If pyDEM sees a `results.zarr` directory in your input directory, it will use the data in this directory and create a duplicate even if you change the data files. To avoid this, choose an output directory that is not in the directory with your source data like `/app/output_directory`.
    - You can begin processing the data with the following example code:
      ```python
      from pydem import process_manager
@@ -62,7 +62,7 @@ This document provides instructions on how to set up a Docker container with pyD
    - If your data has a higher resolution than 30m, you should consider changing the following settings:
      - `drain_pits_max_iter`
      - `drain_pits_max_dist`
-   - Increasing these values will cause longer runtimes but better TWI results with fewer nan values. 
+   - Increasing these values will cause longer runtimes but better TWI results with fewer nan values.
    - It is recommended to scale the `drain_pits_max_dist` by `30 m / your data's meter resolution`
      - Continue to tweak this parameter if you notice several pits (nans) are not draining.
    - Once you have your `drain_pits_max_dist` set, you will need to increase the `drain_pits_max_iter` so the DEM processor iterates enough times for the water to drain across each pixel.
@@ -70,12 +70,12 @@ This document provides instructions on how to set up a Docker container with pyD
    - Refer to the pyDEM `README.md` for all DEM processor settings and descriptions of each.
 
 4. **Overwrite Default Settings**
-   - Here is some example code of how to change the DEM Processor settings. 
+   - Here is some example code of how to change the DEM Processor settings.
    - It is recommended to use the container's installed ipython application to run this code.
    - Create a dictionary with the settings you want to change:
      ```python
-     DEM_processor_settings = { 
-         "drain_pits_max_iter": 1000, 
+     DEM_processor_settings = {
+         "drain_pits_max_iter": 1000,
          "drain_pits_max_dist": 100
      }
      ```
@@ -85,8 +85,8 @@ This document provides instructions on how to set up a Docker container with pyD
 
      path = '/app/data'
      output_path = '/app/output_directory'
-     DEM_processor_settings = { 
-         "drain_pits_max_iter": 1000, 
+     DEM_processor_settings = {
+         "drain_pits_max_iter": 1000,
          "drain_pits_max_dist": 100
      }
 

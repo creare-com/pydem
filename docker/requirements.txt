@@ -7,3 +7,4 @@ traittypes==0.2.1
 zarr==2.17.0
 Cython==3.0.8
 pyDEM==1.0.0
+ipython
