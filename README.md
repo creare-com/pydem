@@ -53,7 +53,7 @@ Calculate the TWI:
 #### 2.1.2 Calculate TWI on a directory of elevation tiles
 The `ProcessManager` class orchestrates multiple processes to compute TWI over multiple tiles in parallel on the same machine. Example usage is as follows:
 ```python
-  from pydem.processing_manager import ProcessManager
+  from pydem.process_manager import ProcessManager
   elevation_source_path = r'/home/twi-users/elevation'
   manager = ProcessManager(
     n_workers=64, # Number of worker processes to use
