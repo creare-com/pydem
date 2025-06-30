@@ -1101,6 +1101,7 @@ class ProcessManager(tl.HasTraits):
         if mets.shape[0] == 1:
             I = np.zeros(1, int)
         else:
+            print(mets,mets_type,self.n_workers*2,-mets[:, mets_type])
             I = np.argpartition(-mets[:, mets_type], self.n_workers * 2)
 
         # Helper function for updating metrics

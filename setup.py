@@ -83,7 +83,7 @@ setup(
 
     install_requires=[
         'rasterio',
-        'numpy',
+        'numpy<2',
         'scipy',
         'geopy',
         'traitlets',
