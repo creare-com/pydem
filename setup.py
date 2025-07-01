@@ -83,14 +83,14 @@ setup(
 
     install_requires=[
         'rasterio',
-        'numpy<2',
+        'numpy',
         'scipy',
         'geopy',
         'traitlets',
         'traittypes',
         'zarr',
         'cython'
-        ],
+    ],
 
     entry_points = {
         'console_scripts' : ['TWIDinf=pydem.commandline_utils:TWIDinf',
