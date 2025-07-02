@@ -144,9 +144,9 @@ def mk_dx_dy_from_geotif_layer(dataset):
         except Exception as e:
             print(f"No 'ELLIPSOID' key in wkt: {e}")
     
-    # clean up ellipsoid (is this needed?)
-    # if ellipsoid == "GRS-1980":
-    #     ellipsoid = "GRS-80"
+    # TODO: clean up ellipsoid - is the below needed?
+    if ellipsoid == "GRS-1980":
+        ellipsoid = "GRS-80"
 
     d = distance(ellipsoid=ellipsoid)
     dx = dataset.transform.a
