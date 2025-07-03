@@ -1,2 +1,19 @@
 [build-system]
-requires = ["setuptools >= 77.0.3", "numpy", "wheel", "cython"]
+requires = ["setuptools >= 80.9.0", "numpy", "wheel", "cython"]
+
+[project]
+name = "pyDEM"
+version = "1.1.0"
+description="Software for calculating Topographic Wetness Index (TWI)"
+requires-python = ">=3"
+authors = [
+  { name = "MPU" }, {name = "RXC" }, { name = "JXM" },
+]
+license = "Apache-2.0"
+readme = "README.md"
+
+[project.urls]
+Homepage="https://github.com/creare-com/pydem"
+
+[tool.setuptools.packages]
+find = { where = ["pydem"] }
