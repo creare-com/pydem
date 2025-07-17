@@ -137,14 +137,13 @@ def mk_dx_dy_from_geotif_layer(dataset):
     try:
         ellipsoid = wkt.split('SPHEROID["')[1].split('"')[0].replace(' ', '-')
     except Exception as e:
-        print(f"No 'SPHEROID' key in wkt: {e}")
-        print("Looking for 'ELLIPSOID' key in wkt instead")
+        print(f"No 'SPHEROID' key in wkt: {e}" + ", looking for 'ELLIPSOID' key in wkt instead")
         try:
             ellipsoid = wkt.split('ELLIPSOID["')[1].split('"')[0].replace(' ', '-')
         except Exception as e:
             print(f"No 'ELLIPSOID' key in wkt: {e}")
     
-    # TODO: clean up ellipsoid - is the below needed?
+    # Handle GRS-1980
     if ellipsoid == "GRS-1980":
         ellipsoid = "GRS-80"
 
