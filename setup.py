@@ -90,7 +90,7 @@ setup(
         'traittypes',
         'zarr',
         'cython'
-        ],
+    ],
 
     entry_points = {
         'console_scripts' : ['TWIDinf=pydem.commandline_utils:TWIDinf',
