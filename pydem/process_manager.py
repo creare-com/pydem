@@ -800,7 +800,7 @@ class ProcessManager(tl.HasTraits):
             crs = rasterio.open(self.elev_source_files[0], 'r').crs
 
         # Create the geotransform(s) for the large file
-        decimals_to_round = 14
+        decimals_to_round = 6
         lat_check_ids = self.grid_id2i.max(axis=1)
         dlats = np.unique(np.round(self.index[lat_check_ids, self._i('dlat')], decimals = decimals_to_round))
         lon_check_ids = self.grid_id2i.max(axis=0)
@@ -830,8 +830,8 @@ class ProcessManager(tl.HasTraits):
                     ) as dataset:
 
                 for i in range(self.n_inputs):
-                    print ("Writing {} of {}".format(i, self.n_inputs))
-                    data = self.out_file[key][self.grid_slice_unique[i]]
+                    print("Writing {} of {}".format(i+1, self.n_inputs))
+                    data = self.out_file[key][self.grid_slice_noverlap[i]]
                     if key == 'uca':
                         data += self.out_file[key + '_edges'][self.grid_slice_unique[i]]
                     slc = self.grid_slice_noverlap[i]
@@ -877,7 +877,7 @@ class ProcessManager(tl.HasTraits):
             crs = rasterio.open(self.elev_source_files[0], 'r').crs
 
         # Create the geotransform(s) for the large file
-        decimals_to_round = 14
+        decimals_to_round = 6
         lat_check_ids = self.grid_id2i.max(axis=1)
         dlats = np.unique(np.round(self.index[lat_check_ids, self._i('dlat')], decimals = decimals_to_round))
         lon_check_ids = self.grid_id2i.max(axis=0)
@@ -904,7 +904,7 @@ class ProcessManager(tl.HasTraits):
                     transform=transform
                 ) as dataset:
             for i in range(int(np.ceil(self.grid_size_tot_unique[0] / 512))):
-                print("Writing block %d of %d" % (i, self.grid_size_tot_unique[0] // 512))
+                print("Writing block %d of %d" % (i+1, self.grid_size_tot_unique[0] // 512))
                 for j in range(int(np.ceil(self.grid_size_tot_unique[1] / 512))):
                     slc = (slice(i * 512, (i + 1) * 512), slice(j * 512, (j + 1) * 512))
                     data = zf[slc]
@@ -1101,7 +1101,7 @@ class ProcessManager(tl.HasTraits):
         if mets.shape[0] == 1:
             I = np.zeros(1, int)
         else:
-            I = np.argpartition(-mets[:, mets_type], self.n_workers * 2)
+            I = np.argpartition(-mets[:, mets_type], self.n_workers * 1)
 
         # Helper function for updating metrics
         def check_mets(finished):
@@ -1123,7 +1123,7 @@ class ProcessManager(tl.HasTraits):
             if mets.shape[0] == 1:
                 I = np.zeros(1, int)
             else:
-                I = np.argpartition(-mets[:, mets_type], self.n_workers * 2)
+                I = np.argpartition(-mets[:, mets_type], self.n_workers * 1)
             return mets, I
 
         I_old = np.zeros_like(I)
