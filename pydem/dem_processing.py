@@ -61,6 +61,7 @@ import traitlets as tl
 import traittypes as tt
 import scipy.sparse as sps
 import scipy.ndimage as spndi
+import logging
 
 from .utils_test_pydem import get_test_data, make_file_names
 from .utils import (get_fn,
@@ -77,6 +78,9 @@ except:
                   " Consider compiling cython functions using: "
                   "python setup.py build_ext --inplace", RuntimeWarning)
 # CYTHON = False
+
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 # A test aspect ration between dx and dy coordinates
 TEST_DIV = 1/1.1  # 0.001
@@ -272,7 +276,7 @@ class DEMProcessor(tl.HasTraits):
             try:
                 setattr(self, name, array['arr_0'])
             except Exception as e:
-                print(e)
+                logger.error(e)
             finally:
                 array.close()
 
@@ -597,7 +601,7 @@ class DEMProcessor(tl.HasTraits):
 
         # %% Calculate the slopes and directions based on the 8 sections from
         # Tarboton http://www.neng.usu.edu/cee/faculty/dtarb/96wr03137.pdf
-        print("Starting slope/direction calculation...")
+        logger.info("Starting slope/direction calculation...")
         self.mag, self.direction = self._slopes_directions(
                 self.elev, self.dX, self.dY, 'tarboton')
         # Find the flat regions. This is mostly simple (look for mag < 0),
@@ -741,7 +745,7 @@ class DEMProcessor(tl.HasTraits):
             self.uca = uca_init.astype('float64')
 
         if uca_init is None:
-            print("Starting uca calculation")
+            logger.info("Starting uca calculation")
             res = self._calc_uca_chunk(self.elev, self.dX, self.dY,
                                        self.direction, self.mag,
                                        self.flats,
@@ -752,7 +756,7 @@ class DEMProcessor(tl.HasTraits):
             # Fix the very last pixel on the edges
             #self.uca = self.fix_edge_pixels(edge_data, edge_init_done, edge_init_todo, self.uca)
         else:
-            print("Starting edge resolution round: ", end='')
+            logger.info("Starting edge resolution round: ", end='')
             # last return value will be None: edge_
             area, e2doi, edone, _ = \
                 self._calc_uca_chunk_update(self.elev, self.dX, self.dY,
@@ -766,7 +770,7 @@ class DEMProcessor(tl.HasTraits):
             self.uca += area
             self.edge_todo = e2doi
             self.edge_done = edone
-        print('..Done')
+        logger.info('..Done')
 
 
         gc.collect()  # Just in case
@@ -871,10 +875,10 @@ class DEMProcessor(tl.HasTraits):
             data, dX, dY, direction, flats)
 
         # Build the drainage or adjacency matrix
-        print("Making adjacency matrix", end='')
+        logger.info("Making adjacency matrix", end='')
         A = self._mk_adjacency_matrix(section, proportion, flats, data, mag, dX, dY)
         B = A.tocsr()
-        print('...done.')
+        logger.info('...done.')
 
         colsum = np.array(A.sum(1)).ravel()
         ids = colsum == 0  # If no one drains into me
@@ -947,7 +951,7 @@ class DEMProcessor(tl.HasTraits):
         max_elev = -1
         while (np.any(~done_) and count < self.circular_ref_maxcount)\
                 and done_sum != done_.sum():
-            print(".", end='') #done_sum, done_.sum(), max_elev, count,
+            logger.info(".", end='') #done_sum, done_.sum(), max_elev, count,
             import sys;sys.stdout.flush()
             done_sum = done_.sum()
             count += 1
@@ -1293,7 +1297,7 @@ class DEMProcessor(tl.HasTraits):
                 epit_border = e[border].min()
             else:
                 epit_border = epit
-            #print(epit, epit_border)
+            #logger.info(epit, epit_border)
             path = [pit]
             for it in range(self.drain_pits_max_iter):
                 border = get_border_index(pit_area, elev.shape, elev.size)
@@ -1424,7 +1428,7 @@ class DEMProcessor(tl.HasTraits):
                 from matplotlib.pyplot import imshow, cla, show, title
                 border = get_border_index(border, elev.shape, elev.size)
                 #cla(); imshow(pits_border.reshape(elev.shape)); show()
-                #print(pits_border[border] <= pi * inside_pit)
+                #logger.info(pits_border[border] <= pi * inside_pit)
                 border = border[pits_border[border] <= pi * inside_pit]
                 border = np.concatenate([border, drain])  # We need to check to make sure drains remain drains
                 pits_border[border] = pi + 1

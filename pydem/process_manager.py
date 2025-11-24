@@ -30,10 +30,14 @@ from multiprocessing import Queue
 from multiprocessing import Process
 from multiprocessing.pool import Pool
 from multiprocessing.context import TimeoutError as mpTimeoutError
+import logging
 # import ipydb
 
 from .dem_processing import DEMProcessor
 from .utils import dem_processor_from_raster_kwargs
+
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 EDGE_SLICES = {
         'left': (slice(0, None), 0),
@@ -830,7 +834,7 @@ class ProcessManager(tl.HasTraits):
                     ) as dataset:
 
                 for i in range(self.n_inputs):
-                    print("Writing {} of {}".format(i+1, self.n_inputs))
+                    logger.info("Writing {} of {}".format(i+1, self.n_inputs))
                     data = self.out_file[key][self.grid_slice_noverlap[i]]
                     if key == 'uca':
                         data += self.out_file[key + '_edges'][self.grid_slice_unique[i]]
@@ -844,7 +848,7 @@ class ProcessManager(tl.HasTraits):
                 if overview_type is not None:
                     if overview_factors is None:
                         overview_factors = [3**i for i in range(1, int(np.log(max(self.grid_size_tot_unique)) / np.log(3)))]
-                        print("Using computed overview factors", overview_factors)
+                        logger.info("Using computed overview factors", overview_factors)
                     dataset.build_overviews(overview_factors, getattr(rasterio.enums.Resampling, overview_type))
                     dataset.update_tags(ns='rio_overview', resampling=overview_type)
 
@@ -904,7 +908,7 @@ class ProcessManager(tl.HasTraits):
                     transform=transform
                 ) as dataset:
             for i in range(int(np.ceil(self.grid_size_tot_unique[0] / 512))):
-                print("Writing block %d of %d" % (i+1, self.grid_size_tot_unique[0] // 512))
+                logger.info("Writing block %d of %d" % (i+1, self.grid_size_tot_unique[0] // 512))
                 for j in range(int(np.ceil(self.grid_size_tot_unique[1] / 512))):
                     slc = (slice(i * 512, (i + 1) * 512), slice(j * 512, (j + 1) * 512))
                     data = zf[slc]
@@ -925,7 +929,7 @@ class ProcessManager(tl.HasTraits):
         for key in keys:
             last_ov = None
             for ov in overviews:
-                print ("Processing overview {}:{}".format(key, ov))
+                logger.info("Processing overview {}:{}".format(key, ov))
                 success = self._calc_overview(out_path, key, ov, last_ov)
                 if success == 0:
                     break
@@ -959,7 +963,7 @@ class ProcessManager(tl.HasTraits):
             return 0
 
         # Making a new file with the required shape/size
-        print("Making a new file with shape {} --> {} and chunks {} --> {}".format(shape, new_shape, chunks, new_chunks))
+        logger.info("Making a new file with shape {} --> {} and chunks {} --> {}".format(shape, new_shape, chunks, new_chunks))
         zf_new = zarr.open(new_file, shape=new_shape, chunks=new_chunks, mode='a', dtype=self.dtype)
 
         # Creating list of inputs, populate kwds
@@ -1193,10 +1197,10 @@ class ProcessManager(tl.HasTraits):
 
                     show()
                 count += 1
-                print('Count {}'.format(count))
+                logger.info('Count {}'.format(count))
                 s = calc_uca_ec(**kwds[I[0]])
                 if s[0] == 0:
-                    print (s[1])
+                    logger.info(s[1])
                 I_old[:] = I[:]
                 mets, I = check_mets([I[0]])
             return mets
@@ -1208,7 +1212,7 @@ class ProcessManager(tl.HasTraits):
         active = I[:self.n_workers * 2].tolist()
         active = [a for a in active if mets[a, 0] > 0]
         res = [pool.apply_async(calc_uca_ec, kwds=kwds[i]) for i in active]
-        print ("Starting with {}".format(active))
+        logger.info("Starting with {}".format(active))
         while res or np.any(I_old != I):
             # monitor and submit new workers as needed
             finished = []
@@ -1219,9 +1223,9 @@ class ProcessManager(tl.HasTraits):
                     finished.append(active[i])
                     finished_res.append(i)
                     if s[0] == 0:
-                        print (s[1])
+                        logger.info(s[1])
                 except (mpTimeoutError, TimeoutError) as e:
-                    print('.', end='')
+                    logger.info('.', end='')
                     pass
             if not finished: continue
             mets, I = check_mets(finished)
@@ -1232,7 +1236,7 @@ class ProcessManager(tl.HasTraits):
             candidates = [c for c in candidates if c not in active and mets[c, 0] > 0][:(self.n_workers * 2 - len(res))]
             res.extend([pool.apply_async(calc_uca_ec, kwds=kwds[i]) for i in candidates])
             active.extend(candidates)
-            print ("Added {}, active {}".format(candidates, active))
+            logger.info("Added {}, active {}".format(candidates, active))
             time.sleep(1)
         pool.close()
         pool.join()
@@ -1252,20 +1256,20 @@ class ProcessManager(tl.HasTraits):
                 if not success[i]:
                     s = function(**kwd)
                     success[i] = s[0]
-                    print (s)
-                    print (kwd)
+                    logger.info(s)
+                    logger.info(kwd)
             return success
 
         pool = Pool(processes=self.n_workers)
 
         # submit workers
-        print ("Sumitting workers", end='...')
+        logger.info("Sumitting workers", end='...')
         #success = [function(**kwds[i])
         #        for i in range(self.n_inputs) if indices[i]]
 
         res = [pool.apply_async(function, kwds=kwd)
                 for i, kwd in enumerate(kwds) if not success[i]]
-        print(" waiting for computation")
+        logger.info(" waiting for computation")
 
         pool.close()  # prevent new tasks from being submitted
 
@@ -1276,19 +1280,19 @@ class ProcessManager(tl.HasTraits):
         for i, r in enumerate(res):
             s = r.get(timeout=0.0001)
             success[i] = s[0]
-            print(s)
+            logger.inforint(s)
         return success
 
     def process_twi(self):
-        print("Compute Grid")
+        logger.info("Compute Grid")
         self.compute_grid()
-        print("Compute Elevation")
+        logger.info("Compute Elevation")
         self.process_elevation()
-        print("Compute Aspect and Slope")
+        logger.info("Compute Aspect and Slope")
         self.process_aspect_slope()
-        print("Compute UCA")
+        logger.info("Compute UCA")
         self.process_uca()
-        print("Compute UCA Corrections")
+        logger.info("Compute UCA Corrections")
         self.process_uca_edges()
 
         out_twi = os.path.join(self.out_path, 'twi')
