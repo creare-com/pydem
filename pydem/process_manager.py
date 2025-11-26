@@ -794,6 +794,12 @@ class ProcessManager(tl.HasTraits):
             overview_type=None,
             overview_factors=None,
             rescale=None):
+        """
+        Developer Notes:
+        - This function will only work correctly for tiles with 0 or 1 pixel overlap. 
+        - If you have tiles with more than 1 pixel overlap, pre-process them to have <=1 pixel overlap first.
+            - Or update this function.
+        """
         if new_path is None:
             new_path = self.out_path.replace('.zarr', '')
 
@@ -1105,7 +1111,7 @@ class ProcessManager(tl.HasTraits):
         if mets.shape[0] == 1:
             I = np.zeros(1, int)
         else:
-            I = np.argpartition(-mets[:, mets_type], self.n_workers * 1)
+            I = np.argpartition(-mets[:, mets_type], min(self.n_workers * 2, mets.shape[0] - 1))
 
         # Helper function for updating metrics
         def check_mets(finished):
@@ -1127,7 +1133,7 @@ class ProcessManager(tl.HasTraits):
             if mets.shape[0] == 1:
                 I = np.zeros(1, int)
             else:
-                I = np.argpartition(-mets[:, mets_type], self.n_workers * 1)
+                I = np.argpartition(-mets[:, mets_type], min(self.n_workers * 2, mets.shape[0] - 1))
             return mets, I
 
         I_old = np.zeros_like(I)
