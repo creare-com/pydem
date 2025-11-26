@@ -2,6 +2,7 @@ build/
 *.pyc
 pyDEM.egg-info/
 pydem/cyfuncs/cyutils.cpp
+pydem/cyfuncs/cyutils.c
 *.pyd
 pydem/reader/inpaint.cpp
 
