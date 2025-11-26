@@ -79,7 +79,7 @@ except:
                   "python setup.py build_ext --inplace", RuntimeWarning)
 # CYTHON = False
 
-logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 # A test aspect ration between dx and dy coordinates
@@ -601,7 +601,7 @@ class DEMProcessor(tl.HasTraits):
 
         # %% Calculate the slopes and directions based on the 8 sections from
         # Tarboton http://www.neng.usu.edu/cee/faculty/dtarb/96wr03137.pdf
-        logger.info("Starting slope/direction calculation...")
+        logger.info("Starting slope/direction calculation")
         self.mag, self.direction = self._slopes_directions(
                 self.elev, self.dX, self.dY, 'tarboton')
         # Find the flat regions. This is mostly simple (look for mag < 0),
@@ -756,7 +756,7 @@ class DEMProcessor(tl.HasTraits):
             # Fix the very last pixel on the edges
             #self.uca = self.fix_edge_pixels(edge_data, edge_init_done, edge_init_todo, self.uca)
         else:
-            logger.info("Starting edge resolution round: ", end='')
+            logger.info("Starting edge resolution round")
             # last return value will be None: edge_
             area, e2doi, edone, _ = \
                 self._calc_uca_chunk_update(self.elev, self.dX, self.dY,
@@ -770,7 +770,7 @@ class DEMProcessor(tl.HasTraits):
             self.uca += area
             self.edge_todo = e2doi
             self.edge_done = edone
-        logger.info('..Done')
+        logger.info('Done')
 
 
         gc.collect()  # Just in case
@@ -875,10 +875,10 @@ class DEMProcessor(tl.HasTraits):
             data, dX, dY, direction, flats)
 
         # Build the drainage or adjacency matrix
-        logger.info("Making adjacency matrix", end='')
+        logger.info("Making adjacency matrix")
         A = self._mk_adjacency_matrix(section, proportion, flats, data, mag, dX, dY)
         B = A.tocsr()
-        logger.info('...done.')
+        logger.info('Done')
 
         colsum = np.array(A.sum(1)).ravel()
         ids = colsum == 0  # If no one drains into me
@@ -951,7 +951,6 @@ class DEMProcessor(tl.HasTraits):
         max_elev = -1
         while (np.any(~done_) and count < self.circular_ref_maxcount)\
                 and done_sum != done_.sum():
-            logger.info(".", end='') #done_sum, done_.sum(), max_elev, count,
             import sys;sys.stdout.flush()
             done_sum = done_.sum()
             count += 1

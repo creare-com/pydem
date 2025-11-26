@@ -36,7 +36,7 @@ import logging
 from .dem_processing import DEMProcessor
 from .utils import dem_processor_from_raster_kwargs
 
-logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 EDGE_SLICES = {
@@ -848,7 +848,7 @@ class ProcessManager(tl.HasTraits):
                 if overview_type is not None:
                     if overview_factors is None:
                         overview_factors = [3**i for i in range(1, int(np.log(max(self.grid_size_tot_unique)) / np.log(3)))]
-                        logger.info("Using computed overview factors", overview_factors)
+                        logger.info("Using computed overview factors " + str(overview_factors))
                     dataset.build_overviews(overview_factors, getattr(rasterio.enums.Resampling, overview_type))
                     dataset.update_tags(ns='rio_overview', resampling=overview_type)
 
@@ -1225,7 +1225,6 @@ class ProcessManager(tl.HasTraits):
                     if s[0] == 0:
                         logger.info(s[1])
                 except (mpTimeoutError, TimeoutError) as e:
-                    logger.info('.', end='')
                     pass
             if not finished: continue
             mets, I = check_mets(finished)
@@ -1263,13 +1262,13 @@ class ProcessManager(tl.HasTraits):
         pool = Pool(processes=self.n_workers)
 
         # submit workers
-        logger.info("Sumitting workers", end='...')
+        logger.info("Sumitting workers")
         #success = [function(**kwds[i])
         #        for i in range(self.n_inputs) if indices[i]]
 
         res = [pool.apply_async(function, kwds=kwd)
                 for i, kwd in enumerate(kwds) if not success[i]]
-        logger.info(" waiting for computation")
+        logger.info("Waiting for computation")
 
         pool.close()  # prevent new tasks from being submitted
 
