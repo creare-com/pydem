@@ -7,7 +7,7 @@ version = "1.1.0"
 description="Software for calculating Topographic Wetness Index (TWI)"
 requires-python = ">=3"
 authors = [
-  { name = "MPU" }, {name = "RXC" }, { name = "JXM" },
+  { name = "Creare" }
 ]
 license = "Apache-2.0"
 readme = "README.md"
