@@ -27,7 +27,7 @@ See `docker/pydem_user_guide.md` for using `PyDEM` with Docker.
 
 Clone the git repository to a directory. You can set up a virtual environment if you like (see Linux / WSL install instructions). After that, run:
 ```
-pip install numpy cython
+pip install numpy cython setuptools wheel
 pip install -e .
 ```
 

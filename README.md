@@ -99,22 +99,21 @@ The following options are used by the DEMProcess object. They can be modified by
 
 *Slopes & Directions*
 
- * `chunk_size_slp_dir`: Chunk size for slopes_directions calculation. Default `512`.
- * `chunk_overlap_slp_dir`: Overlap to use for resolving slopes and directions at chunk edges. Default `4`.
  * `fill_flats`: Fill/interpolate the elevation for flat regions before calculating slopes and directions. The direction cannot be calculated in regions where the slope is 0 because the nominal elevation is all the same. This can happen in very gradual terrain or in lake and river beds, particularly when the input elevation is composed of integers. When `True`, the elevation is interpolated in those regions so that a reasonable slope and direction can be calculated. Default `True`.
  * `fill_flats_below_sea`: Interpolate the elevation for flat regions that are below sea level. Water will never flow out of these "pits", so in many cases you can ignore these regions and achieve faster processing times. Default `False`.
  * `fill_flats_source_tol`: When filling flats, the algorithm finds adjacent "source" pixels and "drain" pixels for each flat region and interpolates the elevation using these data points. This sets the tolerance for the elevation of source pixels above the flat region (i.e. shallow sources are used as sources but not steep cliffs). Default `1`.
  * `fill_flats_peaks`: Interpolate the elevation for flat regions that are "peaks" (local maxima). These regions have a higher elevation than all adjacent pixels, so there are no "source" pixels to use for interpolation. When `True`, a single pixel is selected approximately in the center of the flat region as the "peak"/"source". Default `True`.
  * `fill_flats_pits`: Interpolate the elevation for flat regions that are "pits" (local minima). These regions have a lower elevation than all adjacent pixels, so there are no "drain" pixels to use for interpolation. When `True`, a single pixel is selected approximately in the center of the flat region as the "pit"/"drain". Default `True`.
+ * `fill_flats_max_iter`: Default `10`.
 
  *UCA*
 
- * `resolve_edges`: Ensure edge UCA is continuous across chunks. Default `True`.
- * `chunk_size_uca`: Chunk size for uca calculation. Default `512`.
- * `chunk_overlap_uca`: Overlap to use for resolving uca at chunk edges. Default `32`.
  * `drain_pits`: Drain from "pits" to nearby but non-adjacent pixels. Pits have no lower adjacent pixels to drain to directly. *Note that with `fill_flats_pits` off, this setting will still drain each pixel in large flat regions, but it may be slower and produces less reasonable results.* Default `True`.
- * `drain_pits_max_iter`: Maximum number of iterations to look for drain pixels for pits. Generally, "nearby drains" for a pit/flat region are found by expanding the region upward/outward iteratively. Default `100`.
- * `drain_pits_max_dist`: Maximum distance in coordnate-space to (non-adjacent) drains for pits. Pits that are too far from another pixel with a lower elevation will not drain. Default `20`.
+ * `drain_pits_path`: Default `True`.
+ * `drain_pits_min_border`: Default `False`.
+ * `drain_pits_spill`: Default `False`.
+ * `drain_pits_max_iter`: Maximum number of iterations to look for drain pixels for pits. Generally, "nearby drains" for a pit/flat region are found by expanding the region upward/outward iteratively. Default `300`.
+ * `drain_pits_max_dist`: Maximum distance in coordnate-space to (non-adjacent) drains for pits. Pits that are too far from another pixel with a lower elevation will not drain. Default `32`.
  * `drain_pits_max_dist_XY`: Maximum distance in real-space to (non-adjacent) drains for pits. Pits that are too far from another pixel with a lower elevation will not drain. This filter is applied after `drain_pits_max_dist`; if the X and Y resolution are similar, this filter is generally unnecessary. Default `None`.
  * `drain_flats`: *[Deprecated, replaced by `drain_pits`]* Drains flat regions and pits by draining all pixels in the region to an arbitrary pixel in the region and then draining that pixel to the border of the flat region. Ignored if `drain_pits` is `True`. Default `False`.
  * `apply_uca_limit_edges`: Mark edges as completed if the maximum UCA is reached when resolving drainage across edges. Default `False`. If True, it may speed up large calculations.
@@ -124,10 +123,10 @@ The following options are used by the DEMProcess object. They can be modified by
 
  * `apply_twi_limits`: When calculating TWI, limit TWI to max value. Default `False`.
  * `apply_twi_limits_on_uca`: When calculating TWI, limit UCA to max value. Default `False`.
-
- *Other*
-
-  * `save_projection`: Default `EPSG:4326`.
+ * `twi_min_slope`: Default `1e-3`.
+ * `twi_min_area`: Default `Infinity`.
+ * `circular_ref_maxcount`: Default `50`.
+ * `maximum_pit_area`: Default `32`.
 
 ### 2.2 Commandline Usage
 When installing pydem using the provided setup.py file, the commandline utilities `TWIDinf`, `AreaDinf`, and `DinfFlowDir` are registered with the operating system.

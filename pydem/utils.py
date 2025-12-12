@@ -36,6 +36,10 @@ import numpy as np
 from scipy.ndimage import minimum_filter
 from scipy.ndimage import center_of_mass
 import rasterio
+import logging
+
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 def read_raster(fn):
     return rasterio.open(fn)
@@ -137,12 +141,15 @@ def mk_dx_dy_from_geotif_layer(dataset):
     try:
         ellipsoid = wkt.split('SPHEROID["')[1].split('"')[0].replace(' ', '-')
     except Exception as e:
-        print(f"No 'SPHEROID' key in wkt: {e}")
-
-    try:
-        ellipsoid = wkt.split('ELLIPSOID["')[1].split('"')[0].replace(' ', '-')
-    except Exception as e:
-        print(f"No 'ELLIPSOID' key in wkt: {e}")
+        logger.error(f"No 'SPHEROID' key in wkt: {e}" + ", looking for 'ELLIPSOID' key in wkt instead")
+        try:
+            ellipsoid = wkt.split('ELLIPSOID["')[1].split('"')[0].replace(' ', '-')
+        except Exception as e:
+            logger.error(f"No 'ELLIPSOID' key in wkt: {e}")
+    
+    # Handle GRS-1980
+    if ellipsoid == "GRS-1980":
+        ellipsoid = "GRS-80"
 
     d = distance(ellipsoid=ellipsoid)
     dx = dataset.transform.a

@@ -1,3 +1,9 @@
+# 1.2.0
+
+## Features
+* Fixed geotiff saving functionality
+* Upgraded to .toml
+
 # 1.1.0
 
 ## Features

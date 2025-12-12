@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools >= 80.9.0", "numpy", "wheel", "cython"]
+
+[project]
+name = "pyDEM"
+version = "1.2.0"
+description="Software for calculating Topographic Wetness Index (TWI)"
+requires-python = ">=3"
+authors = [
+  { name = "Creare" }
+]
+license = "Apache-2.0"
+readme = "README.md"
+
+# Correctly defined dependencies (as a list, not nested under another key)
+dependencies = [
+    'rasterio',
+    'numpy',
+    'scipy',
+    'geopy',
+    'traitlets',
+    'traittypes',
+    'zarr',
+    'cython'
+]
+
+[project.urls]
+Homepage="https://github.com/creare-com/pydem"
+
+[tool.setuptools.packages]
+find = { where = ["."] }
+
+[project.scripts]
+TWIDinf = "pydem.commandline_utils:TWIDinf"
+AreaDinf = "pydem.commandline_utils:AreaDinf"
+DinfFlowDir = "pydem.commandline_utils:DinfFlowDir"
