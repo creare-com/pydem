@@ -9,7 +9,7 @@ You can use various flavors of a Python virtual environment. Here's an example u
 ```
 pyenv virtualenv 3.11.2 pydem
 pyenv activate pydem
-pip install numpy cython
+pip install numpy cython wheel setuptools
 pip install pydem
 ```
 
