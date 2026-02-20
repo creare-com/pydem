@@ -38,7 +38,6 @@ from scipy.ndimage import center_of_mass
 import rasterio
 import logging
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 def read_raster(fn):

@@ -36,7 +36,6 @@ import logging
 from .dem_processing import DEMProcessor
 from .utils import dem_processor_from_raster_kwargs
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 EDGE_SLICES = {
