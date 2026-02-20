@@ -1,3 +1,8 @@
+# 1.2.1
+
+## Features
+* Cleaning up logging and changelogs
+
 # 1.2.0
 
 ## Features
