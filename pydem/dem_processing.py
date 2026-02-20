@@ -79,7 +79,6 @@ except:
                   "python setup.py build_ext --inplace", RuntimeWarning)
 # CYTHON = False
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 # A test aspect ration between dx and dy coordinates
